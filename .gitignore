@@ -1,0 +1,10 @@
+models/
+build/
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+.DS_Store
+.vscode/
+dependencies/

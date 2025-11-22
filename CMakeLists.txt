@@ -1,27 +1,62 @@
-cmake_minimum_required(VERSION 3.14)
-project(PoseTracker CXX)
+cmake_minimum_required(VERSION 3.15)
+project(footstep_tracker)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Adjust these paths to where OpenCV and ONNX Runtime are installed
-set(OpenCV_DIR "/path/to/opencv/build")
-set(ONNXRUNTIME_ROOT "/path/to/onnxruntime")
+# Build in Release mode by default for better performance
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
 
+# Enable optimizations
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
+
+# Find OpenCV
 find_package(OpenCV REQUIRED)
+include_directories(${OpenCV_INCLUDE_DIRS})
 
-include_directories(
-    ${OpenCV_INCLUDE_DIRS}
-    ${ONNXRUNTIME_ROOT}/include
-)
+# Find ONNX Runtime
+# First try the local CoreML-enabled version
+set(ONNXRUNTIME_LOCAL "${CMAKE_SOURCE_DIR}/onnxruntime-osx-arm64-1.20.1")
+if(EXISTS ${ONNXRUNTIME_LOCAL})
+    set(ONNXRUNTIME_ROOT ${ONNXRUNTIME_LOCAL})
+    message(STATUS "Using local ONNX Runtime with CoreML: ${ONNXRUNTIME_ROOT}")
+elseif(DEFINED ENV{ONNXRUNTIME_ROOT})
+    set(ONNXRUNTIME_ROOT $ENV{ONNXRUNTIME_ROOT})
+endif()
 
-link_directories(
-    ${ONNXRUNTIME_ROOT}/lib
-)
+if(ONNXRUNTIME_ROOT)
+    include_directories(${ONNXRUNTIME_ROOT}/include)
+    link_directories(${ONNXRUNTIME_ROOT}/lib)
+else()
+    # Fallback to Homebrew on macOS
+    if(APPLE)
+        execute_process(
+            COMMAND brew --prefix onnxruntime
+            OUTPUT_VARIABLE ONNXRUNTIME_PREFIX
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        if(ONNXRUNTIME_PREFIX)
+            include_directories(${ONNXRUNTIME_PREFIX}/include/onnxruntime)
+            link_directories(${ONNXRUNTIME_PREFIX}/lib)
+        endif()
+    endif()
+endif()
 
-add_executable(pose_tracker main.cpp)
+# Add executable
+add_executable(footstep_tracker src/main.cpp)
 
-target_link_libraries(pose_tracker
+# Link libraries
+target_link_libraries(footstep_tracker 
     ${OpenCV_LIBS}
     onnxruntime
 )
+
+# Set rpath for dynamic library loading
+if(ONNXRUNTIME_ROOT)
+    set_target_properties(footstep_tracker PROPERTIES
+        BUILD_RPATH "${ONNXRUNTIME_ROOT}/lib"
+        INSTALL_RPATH "${ONNXRUNTIME_ROOT}/lib"
+    )
+endif()
