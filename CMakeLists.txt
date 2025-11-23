@@ -17,10 +17,10 @@ find_package(OpenCV REQUIRED)
 include_directories(${OpenCV_INCLUDE_DIRS})
 
 # Find ONNX Runtime
-# First try the local CoreML-enabled version
-set(ONNXRUNTIME_LOCAL "${CMAKE_SOURCE_DIR}/onnxruntime-osx-arm64-1.20.1")
-if(EXISTS ${ONNXRUNTIME_LOCAL})
-    set(ONNXRUNTIME_ROOT ${ONNXRUNTIME_LOCAL})
+# First try the local CoreML-enabled version in dependencies folder
+file(GLOB ONNXRUNTIME_DIRS "${CMAKE_SOURCE_DIR}/dependencies/onnxruntime-osx-arm64-*")
+if(ONNXRUNTIME_DIRS)
+    list(GET ONNXRUNTIME_DIRS 0 ONNXRUNTIME_ROOT)
     message(STATUS "Using local ONNX Runtime with CoreML: ${ONNXRUNTIME_ROOT}")
 elseif(DEFINED ENV{ONNXRUNTIME_ROOT})
     set(ONNXRUNTIME_ROOT $ENV{ONNXRUNTIME_ROOT})

@@ -1,117 +1,99 @@
 # Footstep Tracker
 
-A real-time footstep tracking application using MoveNet Lightning model with ONNX Runtime and OpenCV in C++.
+A real-time footstep tracking application using MoveNet pose estimation with ONNX Runtime (CoreML accelerated) and OpenCV in C++.
 
 ## Features
 
-- Real-time pose estimation using MoveNet Lightning
-- Webcam capture and processing
-- Visual tracking of all body keypoints
-- Special highlighting of ankle positions for footstep tracking
-- FPS counter for performance monitoring
+- Real-time pose estimation using MoveNet Thunder/Lightning models
+- Hardware acceleration via Apple's CoreML (Neural Engine + GPU)
+- Webcam capture and processing with AVFoundation backend
+- Visual tracking of leg keypoints and ankle positions
+- Optimized for performance on Apple Silicon Macs
 
-## Prerequisites
+## Quick Setup (macOS)
 
-### macOS
-
-Install dependencies using Homebrew:
+Run the automated setup script:
 
 ```bash
-# Install OpenCV
-brew install opencv
-
-# Install ONNX Runtime
-brew install onnxruntime
+chmod +x setup.sh
+./setup.sh
 ```
 
-### Other Platforms
+This will:
+
+- Install OpenCV via Homebrew
+- Download ONNX Runtime 1.23.2 with CoreML support to `dependencies/` folder
+- Download MoveNet Thunder and Lightning models to `models/` directory
+- Set up the complete project structure
+
+## Manual Setup
+
+### Prerequisites
+
+#### macOS (Apple Silicon)
+
+Required dependencies:
+
+- **OpenCV**: `brew install opencv`
+- **ONNX Runtime with CoreML**: Download from [releases](https://github.com/microsoft/onnxruntime/releases)
+  - Version: 1.23.2 or later
+  - File: `onnxruntime-osx-arm64-{version}.tgz`
+  - Extract in `dependencies/` folder
+
+#### Intel Macs / Other Platforms
 
 - **OpenCV**: Download from [opencv.org](https://opencv.org/)
-- **ONNX Runtime**: Download from [github.com/microsoft/onnxruntime/releases](https://github.com/microsoft/onnxruntime/releases)
+- **ONNX Runtime**: Download appropriate version from [github.com/microsoft/onnxruntime/releases](https://github.com/microsoft/onnxruntime/releases)
 
-## Download the MoveNet Model
+### Download MoveNet Models
 
-1. Create a `models` directory in the project root:
+The project uses MoveNet pose estimation models in ONNX format. Download from Kaggle:
 
+1. Visit [Kaggle MoveNet Models](https://www.kaggle.com/models/google/movenet)
+
+2. Download ONNX versions:
+
+   - **movenet_thunder.onnx** - More accurate, slower (~30-40 FPS on M1)
+   - **movenet_lightning.onnx** - Faster, less accurate (~60+ FPS on M1)
+
+3. Place in the `models/` directory:
    ```bash
    mkdir -p models
+   # Move downloaded files to models/
    ```
 
-2. Download the MoveNet Lightning model in ONNX format:
-
-   You can convert the TensorFlow Lite model to ONNX, or download a pre-converted version:
-
-   ```bash
-   cd models
-   # Download from TensorFlow Hub and convert, or use a pre-converted ONNX model
-   # Place the model as: movenet_lightning.onnx
-   ```
-
-   **Option 1: Using TensorFlow Hub (requires Python)**
-
-   ```bash
-   pip install tensorflow tensorflow-hub onnx tf2onnx
-   ```
-
-   Then create a conversion script `convert_model.py`:
-
-   ```python
-   import tensorflow as tf
-   import tensorflow_hub as hub
-   import tf2onnx
-
-   # Load MoveNet Lightning from TensorFlow Hub
-   model = hub.load('https://tfhub.dev/google/movenet/singlepose/lightning/4')
-   movenet = model.signatures['serving_default']
-
-   # Convert to ONNX
-   spec = (tf.TensorSpec((1, 192, 192, 3), tf.int32, name="input"),)
-   output_path = "models/movenet_lightning.onnx"
-
-   model_proto, _ = tf2onnx.convert.from_function(
-       movenet,
-       input_signature=spec,
-       opset=13,
-       output_path=output_path
-   )
-
-   print(f"Model saved to {output_path}")
-   ```
-
-   Run the conversion:
-
-   ```bash
-   python convert_model.py
-   ```
-
-   **Option 2: Pre-converted model**
-
-   Search for "movenet lightning onnx" to find pre-converted versions, or use other pose estimation ONNX models compatible with the same input format (192x192 RGB).
+**Alternative:** Convert from TensorFlow (advanced users only)
 
 ## Building the Project
 
-1. Create a build directory:
+1. Create build directory and configure:
 
    ```bash
-   mkdir build
-   cd build
-   ```
-
-2. Configure with CMake:
-
-   ```bash
+   mkdir -p build && cd build
    cmake ..
    ```
 
-   If ONNX Runtime is not found automatically, specify its location:
+   **CMake will automatically detect:**
+
+   - Local ONNX Runtime (if extracted in `dependencies/` folder)
+   - Homebrew OpenCV installation
+
+   **Manual ONNX Runtime path (if needed):**
 
    ```bash
-   cmake -DONNXRUNTIME_ROOT=/path/to/onnxruntime ..
+   cmake -DONNXRUNTIME_ROOT=/path/to/onnxruntime-osx-arm64-1.23.2 ..
    ```
 
-3. Build the project:
+2. Build:
+
    ```bash
    cmake --build .
+   ```
+
+   Or for faster parallel build:
+
+   ```bash
+   cmake --build . -j$(sysctl -n hw.ncpu)
    ```
 
 ## Running
@@ -119,40 +101,55 @@ brew install onnxruntime
 From the build directory:
 
 ```bash
+# Run with default model (movenet_thunder.onnx)
 ./footstep_tracker
-```
 
-Or specify a custom model path:
-
-```bash
+# Specify model path
 ./footstep_tracker ../models/movenet_lightning.onnx
+
+# Specify model and camera ID
+./footstep_tracker ../models/movenet_thunder.onnx 0
 ```
 
 ### Controls
 
 - **q**: Quit the application
 
+### Performance
+
+On Apple Silicon (M1/M2/M3) with CoreML acceleration:
+
+- **Thunder model**: ~30-40 FPS (more accurate)
+- **Lightning model**: ~60+ FPS (faster)
+
+The application uses hardware acceleration via CoreML, utilizing the Neural Engine and GPU for optimal performance.
+
 ## Project Structure
 
 ```
 .
-├── CMakeLists.txt           # Build configuration
-├── README.md                # This file
+├── CMakeLists.txt                      # Build configuration
+├── README.md                            # This file
+├── setup.sh                             # Automated setup script
 ├── src/
-│   └── main.cpp            # Main application code
+│   └── main.cpp                        # Main application code
 ├── models/
-│   └── movenet_lightning.onnx  # MoveNet model (download separately)
-└── build/                  # Build directory (created during build)
+│   ├── movenet_thunder.onnx           # MoveNet Thunder (download)
+│   └── movenet_lightning.onnx         # MoveNet Lightning (download)
+├── dependencies/
+│   └── onnxruntime-osx-arm64-1.23.2/  # ONNX Runtime with CoreML
+└── build/                              # Build directory
 ```
 
 ## How It Works
 
-1. **Model Loading**: The application loads the MoveNet Lightning ONNX model using ONNX Runtime
-2. **Webcam Capture**: OpenCV captures frames from your default webcam
-3. **Preprocessing**: Each frame is resized to 192x192 and normalized
-4. **Inference**: The model predicts 17 body keypoints (including ankles)
-5. **Visualization**: Keypoints and skeleton are drawn on the frame, with special emphasis on ankle positions
-6. **Display**: The annotated frame is displayed in real-time
+1. **Hardware Acceleration**: ONNX Runtime with CoreML uses Apple's Neural Engine and GPU
+2. **Model Loading**: Loads MoveNet ONNX model (Thunder or Lightning variant)
+3. **Webcam Capture**: OpenCV captures frames using AVFoundation backend
+4. **Preprocessing**: Frames resized to 256x256 and converted to RGB
+5. **Inference**: Model predicts 17 body keypoints with confidence scores
+6. **Visualization**: Draws leg skeleton and highlights ankles in real-time
+7. **Display**: Shows annotated frame with minimal overhead for maximum FPS
 
 ## Keypoint Detection
 
@@ -171,18 +168,34 @@ Each keypoint has:
 
 **CMake can't find ONNX Runtime:**
 
-- Make sure it's installed via Homebrew: `brew install onnxruntime`
-- Or set the path manually: `cmake -DONNXRUNTIME_ROOT=/path/to/onnxruntime ..`
+- Run `./setup.sh` to download it automatically to `dependencies/` folder
+- Or manually extract `onnxruntime-osx-arm64-{version}.tgz` in `dependencies/` folder
+- Or specify path: `cmake -DONNXRUNTIME_ROOT=/path/to/onnxruntime ..`
 
 **Webcam not opening:**
 
-- Check camera permissions in System Preferences > Security & Privacy > Camera
-- Try a different camera index: Modify `cv::VideoCapture cap(0);` to `cap(1);` in main.cpp
+- Check camera permissions: System Settings > Privacy & Security > Camera
+- Try different camera: `./footstep_tracker ../models/movenet_thunder.onnx 1`
+- Check available cameras: `ls /dev/video*` or use QuickTime to test
 
 **Model file not found:**
 
-- Ensure the model is placed at `models/movenet_lightning.onnx`
-- Or provide the path as a command line argument
+- Download from [Kaggle MoveNet Models](https://www.kaggle.com/models/google/movenet)
+- Place ONNX files in `models/` directory
+- Or specify path: `./footstep_tracker /path/to/model.onnx`
+
+**Low FPS / Performance issues:**
+
+- Ensure CoreML is enabled (check console output for "✓ CoreML acceleration enabled")
+- Use Lightning model for better FPS: `./footstep_tracker ../models/movenet_lightning.onnx`
+- Close other applications using camera/GPU
+- Check Activity Monitor for high CPU usage
+
+**CoreML not working:**
+
+- Update to latest macOS version
+- Verify ONNX Runtime version includes CoreML support (1.20.1+)
+- Check console for CoreML initialization messages
 
 ## Next Steps
 
