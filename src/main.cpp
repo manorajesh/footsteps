@@ -1,4 +1,5 @@
-#include "PoseDetector.h"
+#include "../include/PoseDetector.hpp"
+#include "../include/visualization.hpp"
 #include <iostream>
 #include <opencv2/opencv.hpp>
 
@@ -32,7 +33,7 @@ int main(int argc, char **argv) {
       return -1;
     }
 
-    std::cout << "Press Ctrl+C to quit" << std::endl;
+    std::cout << "Press 'q' to quit" << std::endl;
 
     cv::Mat frame;
     while (true) {
@@ -43,15 +44,16 @@ int main(int argc, char **argv) {
       // Detect pose and get keypoints
       Keypoints keypoints = detector.detectPose(frame);
 
-      // Keypoints are now exposed and ready to use
-      // Each keypoint: keypoints[i] = {y, x, confidence}
-      // Example: Access left ankle
-      // float ankle_y = keypoints[LEFT_ANKLE][0];
-      // float ankle_x = keypoints[LEFT_ANKLE][1];
-      // float confidence = keypoints[LEFT_ANKLE][2];
+      // Visualize the results
+      drawAnkle(frame, keypoints, 0.1f);
+
+      cv::imshow("Footstep Tracker", frame);
+      if (cv::waitKey(1) == 'q')
+        break;
     }
 
     cap.release();
+    cv::destroyAllWindows();
 
   } catch (const std::exception &e) {
     std::cerr << "Error: " << e.what() << std::endl;

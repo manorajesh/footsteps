@@ -1,4 +1,4 @@
-#include "PoseDetector.h"
+#include "../include/PoseDetector.hpp"
 #include <coreml_provider_factory.h>
 
 // Compile-time logging macros
