@@ -3,6 +3,7 @@ project(footstep_tracker)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Build in Release mode by default for better performance
 if(NOT CMAKE_BUILD_TYPE)
