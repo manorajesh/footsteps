@@ -10,8 +10,18 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Enable optimizations
+# Enable optimizations for all builds
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
+set(CMAKE_CXX_FLAGS_DEBUG "-O3 -g")
+
+# Optional: Enable logging with -DENABLE_LOGGING=ON
+option(ENABLE_LOGGING "Enable pose detector logging" OFF)
+if(ENABLE_LOGGING)
+    add_compile_definitions(POSE_DETECTOR_DEBUG)
+    message(STATUS "Pose detector logging: ENABLED")
+else()
+    message(STATUS "Pose detector logging: DISABLED")
+endif()
 
 # Find OpenCV
 find_package(OpenCV REQUIRED)
@@ -46,7 +56,10 @@ else()
 endif()
 
 # Add executable
-add_executable(footstep_tracker src/main.cpp)
+add_executable(footstep_tracker 
+    src/main.cpp
+    src/PoseDetector.cpp
+)
 
 # Link libraries
 target_link_libraries(footstep_tracker 

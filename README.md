@@ -66,35 +66,62 @@ The project uses MoveNet pose estimation models in ONNX format. Download from Ka
 
 ## Building the Project
 
-1. Create build directory and configure:
+### Quick Build
 
-   ```bash
-   mkdir -p build && cd build
-   cmake ..
-   ```
+```bash
+mkdir -p build && cd build
+cmake ..
+make
+```
 
-   **CMake will automatically detect:**
+Fully optimized with `-O3`, _with_ logging (default)
 
-   - Local ONNX Runtime (if extracted in `dependencies/` folder)
-   - Homebrew OpenCV installation
+### Build With Logging
 
-   **Manual ONNX Runtime path (if needed):**
+```bash
+cd build
+cmake -DENABLE_LOGGING=OFF ..
+make
+```
 
-   ```bash
-   cmake -DONNXRUNTIME_ROOT=/path/to/onnxruntime-osx-arm64-1.23.2 ..
-   ```
+Fully optimized with `-O3` **and** logging enabled
 
-2. Build:
+- Initialization messages
+- CoreML status
+- Model info
+- Inference timing (every 30 frames)
 
-   ```bash
-   cmake --build .
-   ```
+### Advanced Configuration
 
-   Or for faster parallel build:
+**CMake will automatically detect:**
 
-   ```bash
-   cmake --build . -j$(sysctl -n hw.ncpu)
-   ```
+- Local ONNX Runtime (if extracted in `dependencies/` folder)
+- Homebrew OpenCV installation
+
+**Manual ONNX Runtime path (if needed):**
+
+```bash
+cmake -DONNXRUNTIME_ROOT=/path/to/onnxruntime-osx-arm64-1.23.2 ..
+```
+
+**Debug build with symbols (for profiling):**
+
+```bash
+cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_LOGGING=ON ..
+make
+```
+
+**Faster parallel build:**
+
+```bash
+make -j$(sysctl -n hw.ncpu)
+```
+
+**Clean build when switching configurations:**
+
+```bash
+cd build && rm -rf * && cmake -DENABLE_LOGGING=ON .. && make
+```
 
 ## Running
 
@@ -102,44 +129,18 @@ From the build directory:
 
 ```bash
 # Run with default model (movenet_thunder.onnx)
-./footstep_tracker
+./build/footstep_tracker
 
 # Specify model path
-./footstep_tracker ../models/movenet_lightning.onnx
+./build/footstep_tracker ../models/movenet_lightning.onnx
 
 # Specify model and camera ID
-./footstep_tracker ../models/movenet_thunder.onnx 0
+./build/footstep_tracker ../models/movenet_thunder.onnx 0
 ```
 
 ### Controls
 
 - **q**: Quit the application
-
-### Performance
-
-On Apple Silicon (M1/M2/M3) with CoreML acceleration:
-
-- **Thunder model**: ~30-40 FPS (more accurate)
-- **Lightning model**: ~60+ FPS (faster)
-
-The application uses hardware acceleration via CoreML, utilizing the Neural Engine and GPU for optimal performance.
-
-## Project Structure
-
-```
-.
-├── CMakeLists.txt                      # Build configuration
-├── README.md                            # This file
-├── setup.sh                             # Automated setup script
-├── src/
-│   └── main.cpp                        # Main application code
-├── models/
-│   ├── movenet_thunder.onnx           # MoveNet Thunder (download)
-│   └── movenet_lightning.onnx         # MoveNet Lightning (download)
-├── dependencies/
-│   └── onnxruntime-osx-arm64-1.23.2/  # ONNX Runtime with CoreML
-└── build/                              # Build directory
-```
 
 ## How It Works
 
@@ -196,17 +197,3 @@ Each keypoint has:
 - Update to latest macOS version
 - Verify ONNX Runtime version includes CoreML support (1.20.1+)
 - Check console for CoreML initialization messages
-
-## Next Steps
-
-This starter code provides the foundation for footstep tracking. You can extend it to:
-
-- Track ankle positions over time
-- Detect footsteps based on ankle movement and ground contact
-- Count steps
-- Analyze gait patterns
-- Record footstep data for analysis
-
-## License
-
-This is starter code for educational purposes. MoveNet model is from Google and subject to its license terms.
