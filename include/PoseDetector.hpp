@@ -31,11 +31,13 @@ enum Keypoint {
 // Each keypoint contains (y, x, confidence)
 using KeypointData = std::array<float, 3>;
 using Keypoints = std::vector<KeypointData>;
+using MultiPoseKeypoints = std::vector<Keypoints>; // Vector of people, each with keypoints
 
 struct PoseDetectorConfig {
-  std::string model_path = "models/movenet_thunder.onnx";
+  std::string model_path = "models/movenet_multipose.onnx";
   int model_input_size = 256;
   int num_keypoints = 17;
+  int max_people = 6; // MultiPose can detect up to 6 people
 
   // Hardware acceleration
   bool use_coreml = true;
@@ -66,11 +68,11 @@ public:
   PoseDetector(PoseDetector &&) = default;
   PoseDetector &operator=(PoseDetector &&) = default;
 
-  // Main detection method - returns keypoints for the frame
-  Keypoints detectPose(const cv::Mat &frame);
+  // Main detection method - returns keypoints for all detected people
+  MultiPoseKeypoints detectPose(const cv::Mat &frame);
 
-  // Get the last detected keypoints without running inference again
-  const Keypoints &getKeypoints() const { return last_keypoints_; }
+  // Get the last detected keypoints for all people without running inference again
+  const MultiPoseKeypoints &getAllKeypoints() const { return all_keypoints_; }
 
   // Configuration access
   const PoseDetectorConfig &getConfig() const { return config_; }
@@ -90,7 +92,7 @@ private:
   std::vector<const char *> output_node_names_;
   std::vector<int64_t> input_node_dims_;
 
-  Keypoints last_keypoints_;
+  MultiPoseKeypoints all_keypoints_;
   int frame_counter_ = 0;
 };
 

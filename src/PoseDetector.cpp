@@ -111,7 +111,7 @@ cv::Mat PoseDetector::preprocessFrame(const cv::Mat &frame) {
   return rgb;
 }
 
-Keypoints PoseDetector::detectPose(const cv::Mat &frame) {
+MultiPoseKeypoints PoseDetector::detectPose(const cv::Mat &frame) {
   // Preprocess
   cv::Mat input_tensor = preprocessFrame(frame);
 
@@ -159,16 +159,32 @@ Keypoints PoseDetector::detectPose(const cv::Mat &frame) {
   // Get output
   float *output_data = output_tensors[0].GetTensorMutableData<float>();
 
-  // Parse keypoints
-  last_keypoints_.clear();
-  for (int i = 0; i < config_.num_keypoints; i++) {
-    KeypointData kp = {
-        output_data[i * 3 + 0], // y
-        output_data[i * 3 + 1], // x
-        output_data[i * 3 + 2]  // confidence
-    };
-    last_keypoints_.push_back(kp);
+  // Parse multipose output: [1, 6, 56]
+  // Each person has 56 values: 17 keypoints * 3 + 4 bbox + 1 score
+  all_keypoints_.clear();
+  
+  for (int person = 0; person < config_.max_people; person++) {
+    int person_offset = person * 56;
+    
+    // Check overall detection score (last value for this person)
+    float detection_score = output_data[person_offset + 55];
+    
+    // Skip people with low detection confidence
+    if (detection_score < 0.3f) {
+      continue;
+    }
+    
+    Keypoints person_keypoints;
+    for (int i = 0; i < config_.num_keypoints; i++) {
+      KeypointData kp = {
+          output_data[person_offset + i * 3 + 0], // y
+          output_data[person_offset + i * 3 + 1], // x
+          output_data[person_offset + i * 3 + 2]  // confidence
+      };
+      person_keypoints.push_back(kp);
+    }
+    all_keypoints_.push_back(person_keypoints);
   }
 
-  return last_keypoints_;
+  return all_keypoints_;
 }

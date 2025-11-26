@@ -81,35 +81,20 @@ else
 fi
 echo ""
 
-# Download MoveNet models
-THUNDER_MODEL="models/movenet_thunder.onnx"
-LIGHTNING_MODEL="models/movenet_lightning.onnx"
+# Download MoveNet model
+MULTIPOSE_MODEL="models/movenet_multipose.onnx"
 
-echo "📦 Downloading MoveNet models..."
+echo "📦 Downloading MoveNet MultiPose Lightning model..."
 
-# Download Thunder model
-if [ -f "$THUNDER_MODEL" ]; then
-    echo "✓ MoveNet Thunder already exists"
+if [ -f "$MULTIPOSE_MODEL" ]; then
+    echo "✓ MoveNet MultiPose Lightning already exists"
 else
-    echo "Downloading MoveNet Thunder (more accurate, slower)..."
-    curl -L -o "$THUNDER_MODEL" "https://huggingface.co/Xenova/movenet-singlepose-thunder/resolve/main/onnx/model.onnx"
-    if [ -f "$THUNDER_MODEL" ]; then
-        echo "✓ MoveNet Thunder downloaded"
+    echo "Downloading MoveNet MultiPose Lightning..."
+    curl -L -o "$MULTIPOSE_MODEL" "https://huggingface.co/Xenova/movenet-multipose-lightning/resolve/main/onnx/model.onnx"
+    if [ -f "$MULTIPOSE_MODEL" ]; then
+        echo "✓ MoveNet MultiPose Lightning downloaded"
     else
-        echo "⚠️  Failed to download MoveNet Thunder"
-    fi
-fi
-
-# Download Lightning model
-if [ -f "$LIGHTNING_MODEL" ]; then
-    echo "✓ MoveNet Lightning already exists"
-else
-    echo "Downloading MoveNet Lightning (faster, less accurate)..."
-    curl -L -o "$LIGHTNING_MODEL" "https://huggingface.co/Xenova/movenet-singlepose-lightning/resolve/main/onnx/model.onnx"
-    if [ -f "$LIGHTNING_MODEL" ]; then
-        echo "✓ MoveNet Lightning downloaded"
-    else
-        echo "⚠️  Failed to download MoveNet Lightning"
+        echo "⚠️  Failed to download MoveNet MultiPose Lightning"
     fi
 fi
 

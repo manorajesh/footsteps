@@ -28,6 +28,14 @@ inline void drawAnkle(cv::Mat &frame, const Keypoints &keypoints,
   }
 }
 
+// Draw ankles for all detected people
+inline void drawAllAnkles(cv::Mat &frame, const MultiPoseKeypoints &all_keypoints,
+                          float confidence_threshold = 0.3f) {
+  for (const auto &keypoints : all_keypoints) {
+    drawAnkle(frame, keypoints, confidence_threshold);
+  }
+}
+
 inline void drawAllKeypoints(cv::Mat &frame, const Keypoints &keypoints,
                              float confidence_threshold = 0.3f) {
   int height = frame.rows;

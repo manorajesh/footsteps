@@ -4,7 +4,7 @@
 #include <opencv2/opencv.hpp>
 
 int main(int argc, char **argv) {
-  std::string model_path = "models/movenet_thunder.onnx";
+  std::string model_path = "models/movenet_multipose.onnx";
   int camera_id = 0;
 
   // Parse arguments: ./footstep_tracker [model_path] [camera_id]
@@ -28,7 +28,7 @@ int main(int argc, char **argv) {
     if (!cap.isOpened()) {
       std::cerr << "Error: Could not open camera " << camera_id << std::endl;
       std::cerr << "Try a different camera ID with: ./footstep_tracker "
-                   "models/movenet_lightning.onnx <camera_id>"
+                   "models/movenet_multipose.onnx <camera_id>"
                 << std::endl;
       return -1;
     }
@@ -41,11 +41,11 @@ int main(int argc, char **argv) {
       if (frame.empty())
         break;
 
-      // Detect pose and get keypoints
-      Keypoints keypoints = detector.detectPose(frame);
+      // Detect pose and get keypoints for all people
+      MultiPoseKeypoints all_keypoints = detector.detectPose(frame);
 
-      // Visualize the results
-      drawAnkle(frame, keypoints, 0.1f);
+      // Visualize all ankle points
+      drawAllAnkles(frame, all_keypoints, 0.1f);
 
       cv::imshow("Footstep Tracker", frame);
       if (cv::waitKey(1) == 'q')
