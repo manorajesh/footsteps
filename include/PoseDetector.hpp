@@ -31,7 +31,8 @@ enum Keypoint {
 // Each keypoint contains (y, x, confidence)
 using KeypointData = std::array<float, 3>;
 using Keypoints = std::vector<KeypointData>;
-using MultiPoseKeypoints = std::vector<Keypoints>; // Vector of people, each with keypoints
+using MultiPoseKeypoints =
+    std::vector<Keypoints>; // Vector of people, each with keypoints
 
 struct PoseDetectorConfig {
   std::string model_path = "models/movenet_multipose.onnx";
@@ -71,7 +72,8 @@ public:
   // Main detection method - returns keypoints for all detected people
   MultiPoseKeypoints detectPose(const cv::Mat &frame);
 
-  // Get the last detected keypoints for all people without running inference again
+  // Get the last detected keypoints for all people without running inference
+  // again
   const MultiPoseKeypoints &getAllKeypoints() const { return all_keypoints_; }
 
   // Configuration access

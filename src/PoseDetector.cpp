@@ -162,18 +162,18 @@ MultiPoseKeypoints PoseDetector::detectPose(const cv::Mat &frame) {
   // Parse multipose output: [1, 6, 56]
   // Each person has 56 values: 17 keypoints * 3 + 4 bbox + 1 score
   all_keypoints_.clear();
-  
+
   for (int person = 0; person < config_.max_people; person++) {
     int person_offset = person * 56;
-    
+
     // Check overall detection score (last value for this person)
     float detection_score = output_data[person_offset + 55];
-    
+
     // Skip people with low detection confidence
     if (detection_score < 0.3f) {
       continue;
     }
-    
+
     Keypoints person_keypoints;
     for (int i = 0; i < config_.num_keypoints; i++) {
       KeypointData kp = {
