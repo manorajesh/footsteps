@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
       MultiPoseKeypoints all_keypoints = detector.detectPose(frame);
 
       // Visualize all ankle points
-      drawAllAnkles(frame, all_keypoints, 0.1f);
+      drawAllKeypoints(frame, all_keypoints, 0.1f);
 
       cv::imshow("Footstep Tracker", frame);
       if (cv::waitKey(1) == 'q')

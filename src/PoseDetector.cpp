@@ -24,6 +24,17 @@ PoseDetector::PoseDetector(const PoseDetectorConfig &config)
 void PoseDetector::initializeSession() {
   // Configure CoreML acceleration if requested
   if (config_.use_coreml) {
+    // Set CoreML session options for optimal performance
+    session_options_.AddConfigEntry("session.coreml.ModelFormat", "MLProgram");
+    session_options_.AddConfigEntry("session.coreml.MLComputeUnits", "ALL");
+    session_options_.AddConfigEntry("session.coreml.RequireStaticInputShapes",
+                                    "1");
+    session_options_.AddConfigEntry("session.coreml.EnableOnSubgraphs", "1");
+    session_options_.AddConfigEntry("session.coreml.SpecializationStrategy",
+                                    "FastPrediction");
+    session_options_.AddConfigEntry(
+        "session.coreml.AllowLowPrecisionAccumulationOnGPU", "1");
+
     uint32_t coreml_flags = 0;
     if (config_.use_cpu_and_gpu) {
       coreml_flags |= COREML_FLAG_USE_CPU_AND_GPU;
