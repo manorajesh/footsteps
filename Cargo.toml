@@ -1,0 +1,19 @@
+[package]
+name = "footstep-tracker"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+opencv = { version = "0.95", default-features = false, features = ["videoio", "imgcodecs", "imgproc", "highgui"] }
+ort = { version = "2.0.0-rc.10", features = ["coreml"] }
+ndarray = "0.16"
+anyhow = "1.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+# Optional feature for debug logging
+[features]
+debug = []
