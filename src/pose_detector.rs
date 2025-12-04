@@ -1,4 +1,4 @@
-use anyhow::{ Context, Result };
+use anyhow::Result;
 use opencv::{ core, imgproc, prelude::* };
 use coreml_rs::{ CoreMLModelOptions, CoreMLModelWithState, ComputePlatform };
 use ndarray::Array4;
