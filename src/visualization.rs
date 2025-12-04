@@ -2,6 +2,20 @@ use crate::pose_detector::{ Keypoint, Keypoints, MultiPoseKeypoints };
 use anyhow::Result;
 use opencv::{ core, imgproc, prelude::* };
 
+fn confidence_to_color(confidence: f32) -> core::Scalar {
+    let confidence = confidence.clamp(0.0, 1.0);
+
+    if confidence < 0.5 {
+        let t = confidence * 2.0; // 0.0 to 1.0
+        let green = (255.0 * t) as f64;
+        core::Scalar::new(0.0, green, 255.0, 0.0) // BGR
+    } else {
+        let t = (confidence - 0.5) * 2.0; // 0.0 to 1.0
+        let red = (255.0 * (1.0 - t)) as f64;
+        core::Scalar::new(0.0, 255.0, red, 0.0) // BGR
+    }
+}
+
 /// Draw ankle keypoints for a single person
 pub fn draw_ankle(frame: &mut Mat, keypoints: &Keypoints, confidence_threshold: f32) -> Result<()> {
     let height = frame.rows();
@@ -11,11 +25,13 @@ pub fn draw_ankle(frame: &mut Mat, keypoints: &Keypoints, confidence_threshold: 
     if keypoints[Keypoint::LeftAnkle as usize][2] > confidence_threshold {
         let x = (keypoints[Keypoint::LeftAnkle as usize][1] * (width as f32)) as i32;
         let y = (keypoints[Keypoint::LeftAnkle as usize][0] * (height as f32)) as i32;
+        let confidence = keypoints[Keypoint::LeftAnkle as usize][2];
+        let color = confidence_to_color(confidence);
         imgproc::circle(
             frame,
             core::Point::new(x, y),
             20,
-            core::Scalar::new(0.0, 0.0, 255.0, 0.0), // Red (BGR)
+            color,
             -1, // Filled
             imgproc::LINE_8,
             0
@@ -26,11 +42,13 @@ pub fn draw_ankle(frame: &mut Mat, keypoints: &Keypoints, confidence_threshold: 
     if keypoints[Keypoint::RightAnkle as usize][2] > confidence_threshold {
         let x = (keypoints[Keypoint::RightAnkle as usize][1] * (width as f32)) as i32;
         let y = (keypoints[Keypoint::RightAnkle as usize][0] * (height as f32)) as i32;
+        let confidence = keypoints[Keypoint::RightAnkle as usize][2];
+        let color = confidence_to_color(confidence);
         imgproc::circle(
             frame,
             core::Point::new(x, y),
             20,
-            core::Scalar::new(0.0, 0.0, 255.0, 0.0), // Red (BGR)
+            color,
             -1, // Filled
             imgproc::LINE_8,
             0
@@ -84,16 +102,18 @@ pub fn draw_all_keypoints(
     ];
 
     for keypoints in all_keypoints {
-        // Draw all keypoints
+        // Draw all keypoints with confidence-based colors
         for kp in keypoints {
             if kp[2] > confidence_threshold {
                 let x = (kp[1] * (width as f32)) as i32;
                 let y = (kp[0] * (height as f32)) as i32;
+                let confidence = kp[2];
+                let color = confidence_to_color(confidence);
                 imgproc::circle(
                     frame,
                     core::Point::new(x, y),
                     5,
-                    core::Scalar::new(0.0, 255.0, 0.0, 0.0), // Green (BGR)
+                    color,
                     -1, // Filled
                     imgproc::LINE_8,
                     0
