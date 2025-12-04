@@ -1,8 +1,8 @@
 use anyhow::{ Context, Result };
 use opencv::{ core, imgproc, prelude::* };
-use ort::execution_providers::CoreMLExecutionProvider;
-use ort::session::{ Session, builder::GraphOptimizationLevel };
-use ort::value::Value;
+use coreml_rs::{ CoreMLModelOptions, CoreMLModelWithState, ComputePlatform };
+use ndarray::Array4;
+use half;
 
 /// Keypoint indices for the 17-point COCO skeleton
 #[derive(Debug, Clone, Copy)]
@@ -39,29 +39,23 @@ pub struct PoseDetectorConfig {
     pub model_input_size: usize,
     pub num_keypoints: usize,
     pub max_people: usize,
-    pub use_coreml: bool,
-    pub intra_op_threads: usize,
-    pub inter_op_threads: usize,
 }
 
 impl Default for PoseDetectorConfig {
     fn default() -> Self {
         Self {
-            model_path: "models/movenet_multipose.onnx".to_string(),
+            model_path: "models/movenet_multipose.mlmodelc".to_string(),
             model_input_size: 256,
             num_keypoints: 17,
             max_people: 6,
-            use_coreml: true,
-            intra_op_threads: 4,
-            inter_op_threads: 4,
         }
     }
 }
 
-/// Pose detector using ONNX Runtime
+/// Pose detector using CoreML
 pub struct PoseDetector {
     config: PoseDetectorConfig,
-    session: Session,
+    model: CoreMLModelWithState,
     #[cfg(feature = "debug")]
     frame_counter: usize,
 }
@@ -70,58 +64,18 @@ impl PoseDetector {
     /// Create a new pose detector with the given configuration
     pub fn new(config: PoseDetectorConfig) -> Result<Self> {
         #[cfg(feature = "debug")]
-        println!("Initializing Pose Detector...");
+        println!("Initializing Pose Detector with CoreML...");
 
-        // Configure CoreML acceleration if requested
-        let session = if config.use_coreml {
-            #[cfg(feature = "debug")]
-            {
-                println!("Attempting CoreML initialization...");
-                match
-                    Session::builder()?
-                        .with_execution_providers([CoreMLExecutionProvider::default().build()])?
-                        .with_intra_threads(config.intra_op_threads)?
-                        .with_inter_threads(config.inter_op_threads)?
-                        .with_optimization_level(GraphOptimizationLevel::Level3)?
-                        .commit_from_file(&config.model_path)
-                {
-                    Ok(session) => {
-                        println!("✓ CoreML (GPU/Neural Engine) acceleration enabled!");
-                        println!("Note: CoreML may still fall back to CPU for unsupported ops");
-                        session
-                    }
-                    Err(e) => {
-                        println!("⚠ CoreML initialization failed: {}", e);
-                        println!("Falling back to CPU-only execution...");
-                        Session::builder()?
-                            .with_intra_threads(config.intra_op_threads)?
-                            .with_inter_threads(config.inter_op_threads)?
-                            .with_optimization_level(GraphOptimizationLevel::Level3)?
-                            .commit_from_file(&config.model_path)
-                            .context("Failed to load ONNX model")?
-                    }
-                }
-            }
+        let mut model_options = CoreMLModelOptions::default();
+        model_options.compute_platform = ComputePlatform::CpuAndANE;
 
-            #[cfg(not(feature = "debug"))]
-            Session::builder()?
-                .with_execution_providers([CoreMLExecutionProvider::default().build()])?
-                .with_intra_threads(config.intra_op_threads)?
-                .with_inter_threads(config.inter_op_threads)?
-                .with_optimization_level(GraphOptimizationLevel::Level3)?
-                .commit_from_file(&config.model_path)
-                .context("Failed to load ONNX model")?
-        } else {
-            Session::builder()?
-                .with_intra_threads(config.intra_op_threads)?
-                .with_inter_threads(config.inter_op_threads)?
-                .with_optimization_level(GraphOptimizationLevel::Level3)?
-                .commit_from_file(&config.model_path)
-                .context("Failed to load ONNX model")?
-        };
+        let model = CoreMLModelWithState::new(&config.model_path, model_options)
+            .load()
+            .map_err(|e| anyhow::anyhow!("Failed to load CoreML model: {:?}", e))?;
 
         #[cfg(feature = "debug")]
         {
+            println!("✓ CoreML model loaded with Neural Engine acceleration!");
             println!("Model: {}", config.model_path);
             println!("Input size: {}", config.model_input_size);
         }
@@ -131,7 +85,7 @@ impl PoseDetector {
 
         Ok(Self {
             config,
-            session,
+            model,
             #[cfg(feature = "debug")]
             frame_counter: 0,
         })
@@ -164,29 +118,35 @@ impl PoseDetector {
         // Preprocess
         let input_tensor = self.preprocess_frame(frame)?;
 
-        // Convert to i32 tensor
+        // Convert to f32 tensor
         let mut input_data =
-            vec![0i32; self.config.model_input_size * self.config.model_input_size * 3];
+            vec![0f32; self.config.model_input_size * self.config.model_input_size * 3];
         let raw_data = input_tensor.data_bytes()?;
 
         for (i, &byte) in raw_data.iter().enumerate() {
             if i < input_data.len() {
-                input_data[i] = byte as i32;
+                input_data[i] = byte as f32;
             }
         }
 
-        // Create input tensor as ort::Value
-        let input_array = ndarray::Array4::from_shape_vec(
+        // Create input tensor for CoreML
+        let input_array = Array4::from_shape_vec(
             (1, self.config.model_input_size, self.config.model_input_size, 3),
             input_data
         )?;
-        let input = Value::from_array(input_array)?;
+
+        // Add input to CoreML model
+        self.model
+            .add_input("input", input_array.into_dyn())
+            .map_err(|e| anyhow::anyhow!("Failed to add input to CoreML model: {:?}", e))?;
 
         // Run inference
         #[cfg(feature = "debug")]
         let start = std::time::Instant::now();
 
-        let outputs = self.session.run(ort::inputs![input])?;
+        let mut outputs = self.model
+            .predict()
+            .map_err(|e| anyhow::anyhow!("CoreML prediction failed: {:?}", e))?;
 
         #[cfg(feature = "debug")]
         {
@@ -197,10 +157,19 @@ impl PoseDetector {
             }
         }
 
-        // Parse output
-        let output = &outputs[0];
-        let tensor = output.try_extract_tensor::<f32>()?;
-        let output_data = tensor.1; // (shape, data) tuple
+        // Extract Float16 output and convert to f32
+        let ml_array = outputs.outputs
+            .remove("Identity")
+            .ok_or_else(|| anyhow::anyhow!("Output 'Identity' not found"))?;
+
+        let output_u16_array = ml_array.extract_to_tensor::<u16>();
+        let (output_u16, _) = output_u16_array.into_raw_vec_and_offset();
+
+        // Convert u16 (Float16 bits) to f32
+        let output_data: Vec<f32> = output_u16
+            .iter()
+            .map(|&bits| half::f16::from_bits(bits).to_f32())
+            .collect();
 
         // Parse multipose output: [1, 6, 56]
         // Each person has 56 values: 17 keypoints * 3 + 4 bbox + 1 score
@@ -230,9 +199,5 @@ impl PoseDetector {
         }
 
         Ok(all_keypoints)
-    }
-
-    pub fn config(&self) -> &PoseDetectorConfig {
-        &self.config
     }
 }

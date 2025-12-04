@@ -5,9 +5,10 @@ edition = "2021"
 
 [dependencies]
 opencv = { version = "0.95", default-features = false, features = ["videoio", "imgcodecs", "imgproc", "highgui"] }
-ort = { version = "2.0.0-rc.10", features = ["coreml"] }
+coreml-rs = { path = "./coreml-rs" }
 ndarray = "0.16"
 anyhow = "1.0"
+half = "2.3"
 
 [profile.release]
 opt-level = 3

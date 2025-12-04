@@ -13,15 +13,14 @@ fn main() -> Result<()> {
     let model_path = if args.len() > 1 {
         args[1].clone()
     } else {
-        "models/movenet_multipose.onnx".to_string()
+        "models/movenet_multipose.mlpackage".to_string()
     };
 
-    let camera_id = if args.len() > 2 { args[2].parse::<i32>().unwrap_or(0) } else { 0 };
+    let camera_id = if args.len() > 2 { args[2].parse().unwrap_or(0) } else { 0 };
 
     // Configure and initialize the pose detector
     let config = PoseDetectorConfig {
         model_path,
-        use_coreml: true,
         ..Default::default()
     };
 
@@ -35,14 +34,14 @@ fn main() -> Result<()> {
     if !videoio::VideoCapture::is_opened(&cap)? {
         eprintln!("Error: Could not open camera {}", camera_id);
         eprintln!(
-            "Try a different camera ID with: cargo run --release -- models/movenet_multipose.onnx <camera_id>"
+            "Try a different camera ID with: cargo run --release -- models/movenet_multipose.mlpackage <camera_id>"
         );
         return Ok(());
     }
 
     println!("Press 'q' to quit");
 
-    let window_name = "Footstep Tracker";
+    let window_name = "Footstep Tracker - CoreML";
     highgui::named_window(window_name, highgui::WINDOW_AUTOSIZE)?;
 
     loop {
