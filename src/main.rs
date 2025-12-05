@@ -1,10 +1,12 @@
 mod pose_detector;
 mod visualization;
+mod footstep_tracker;
 
 use anyhow::{ Context, Result };
 use opencv::{ highgui, prelude::*, videoio };
 use pose_detector::{ PoseDetector, PoseDetectorConfig };
-use visualization::draw_all_keypoints;
+use visualization::{ draw_all_keypoints, draw_footsteps };
+use footstep_tracker::FootstepTracker;
 
 fn main() -> Result<()> {
     // Parse command line arguments
@@ -25,6 +27,9 @@ fn main() -> Result<()> {
     };
 
     let mut detector = PoseDetector::new(config).context("Failed to initialize pose detector")?;
+
+    // Initialize footstep tracker (footsteps visible for 5 seconds)
+    let mut footstep_tracker = FootstepTracker::new(5);
 
     // Open webcam with AVFoundation backend (better for macOS)
     let mut cap = videoio::VideoCapture
@@ -66,8 +71,15 @@ fn main() -> Result<()> {
             }
         }
 
+        // Update footstep tracking
+        footstep_tracker.update(&all_keypoints);
+
         // Visualize all keypoints
         draw_all_keypoints(&mut frame, &all_keypoints, 0.1)?;
+
+        // Draw footsteps
+        let all_footsteps = footstep_tracker.get_all_footsteps();
+        draw_footsteps(&mut frame, &all_footsteps)?;
 
         highgui::imshow(window_name, &frame)?;
 
