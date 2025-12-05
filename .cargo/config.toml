@@ -1,0 +1,29 @@
+[build]
+rustflags = ["-C", "link-arg=-Wl,-rpath,@loader_path"]
+
+[target.aarch64-apple-darwin]
+rustflags = [
+    "-C", "link-arg=-Wl,-rpath,@loader_path",
+    "-C", "link-arg=-Wl,-rpath,/opt/homebrew/lib",
+    "-C", "link-arg=-Wl,-rpath,/opt/homebrew/opt/llvm/lib",
+    "-C", "link-arg=-Wl,-rpath,/usr/lib/swift",
+]
+
+[target.x86_64-apple-darwin]
+rustflags = [
+    "-C", "link-arg=-Wl,-rpath,@loader_path",
+    "-C", "link-arg=-Wl,-rpath,/usr/local/lib",
+]
+
+[env]
+# libclang configuration (required for opencv-rust build)
+LIBCLANG_PATH = "/opt/homebrew/opt/llvm/lib"
+DYLD_FALLBACK_LIBRARY_PATH = "/opt/homebrew/opt/llvm/lib"
+
+# OpenCV configuration - use pkg-config for proper linking
+PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig"
+
+# Uncomment if using vcpkg instead of Homebrew
+# VCPKG_ROOT = "/path/to/vcpkg"
+# OPENCV_LINK_PATHS = "/path/to/vcpkg/installed/arm64-osx/lib"
+# OPENCV_INCLUDE_PATHS = "/path/to/vcpkg/installed/arm64-osx/include"
