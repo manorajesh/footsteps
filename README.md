@@ -1,141 +1,100 @@
 # Footstep Tracker
 
-A real-time footstep tracking application using MoveNet pose estimation with ONNX Runtime (CoreML accelerated) and OpenCV in C++.
+A real-time footstep tracking application using MoveNet pose estimation with CoreML acceleration, written in Rust with OpenCV bindings.
 
 ## Features
 
-- Real-time pose estimation using MoveNet Thunder/Lightning models
+- Real-time multi-person pose estimation using MoveNet Multipose model
 - Hardware acceleration via Apple's CoreML (Neural Engine + GPU)
 - Webcam capture and processing with AVFoundation backend
-- Visual tracking of leg keypoints and ankle positions
+- Visual tracking of all body keypoints and skeleton connections
+- Temporal smoothing for stable keypoint tracking
 - Optimized for performance on Apple Silicon Macs
+- Written in Rust for safety and performance
 
-## Quick Setup (macOS)
+## Prerequisites
 
-Run the automated setup script:
+### macOS (Apple Silicon or Intel)
+
+Required dependencies:
+
+- **Rust**: Install from [rustup.rs](https://rustup.rs/)
+
+  ```bash
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+  ```
+
+- **OpenCV**: Install via Homebrew
+  ```bash
+  brew install opencv
+  ```
+
+### MoveNet Models
+
+The project uses MoveNet Multipose model in CoreML format. You can either:
+
+1. **Use the included model**: The repository includes a pre-converted `movenet_multipose.mlpackage`
+
+2. **Convert from ONNX** (optional): Use the provided `convert_coreml.py` script:
+   ```bash
+   pip install coremltools onnx
+   python convert_coreml.py
+   ```
+
+## Building the Project
+
+### Quick Build (Release Mode)
 
 ```bash
-chmod +x setup.sh
-./setup.sh
+cargo build --release
 ```
 
 This will:
 
-- Install OpenCV via Homebrew
-- Download ONNX Runtime 1.23.2 with CoreML support to `dependencies/` folder
-- Download MoveNet Thunder and Lightning models to `models/` directory
-- Set up the complete project structure
+- Compile with full optimizations (`opt-level = 3`)
+- Enable Link-Time Optimization (LTO)
+- Create binary at `target/release/footstep-tracker`
 
-## Manual Setup
-
-### Prerequisites
-
-#### macOS (Apple Silicon)
-
-Required dependencies:
-
-- **OpenCV**: `brew install opencv`
-- **ONNX Runtime with CoreML**: Download from [releases](https://github.com/microsoft/onnxruntime/releases)
-  - Version: 1.23.2 or later
-  - File: `onnxruntime-osx-arm64-{version}.tgz`
-  - Extract in `dependencies/` folder
-
-#### Intel Macs / Other Platforms
-
-- **OpenCV**: Download from [opencv.org](https://opencv.org/)
-- **ONNX Runtime**: Download appropriate version from [github.com/microsoft/onnxruntime/releases](https://github.com/microsoft/onnxruntime/releases)
-
-### Download MoveNet Models
-
-The project uses MoveNet pose estimation models in ONNX format. Download from Kaggle:
-
-1. Visit [Kaggle MoveNet Models](https://www.kaggle.com/models/google/movenet)
-
-2. Download ONNX versions:
-
-   - **movenet_thunder.onnx** - More accurate, slower (~30-40 FPS on M1)
-   - **movenet_lightning.onnx** - Faster, less accurate (~60+ FPS on M1)
-
-3. Place in the `models/` directory:
-   ```bash
-   mkdir -p models
-   # Move downloaded files to models/
-   ```
-
-**Alternative:** Convert from TensorFlow (advanced users only)
-
-## Building the Project
-
-### Quick Build
+### Development Build
 
 ```bash
-mkdir -p build && cd build
-cmake ..
-make
+cargo build
 ```
 
-Fully optimized with `-O3`, _with_ logging (default)
+Faster compilation for development, with debug symbols.
 
-### Build With Logging
+### Build with Debug Logging
+
+Enable verbose logging for debugging:
 
 ```bash
-cd build
-cmake -DENABLE_LOGGING=OFF ..
-make
+cargo build --release --features debug
 ```
 
-Fully optimized with `-O3` **and** logging enabled
+This enables:
 
-- Initialization messages
-- CoreML status
-- Model info
-- Inference timing (every 30 frames)
-
-### Advanced Configuration
-
-**CMake will automatically detect:**
-
-- Local ONNX Runtime (if extracted in `dependencies/` folder)
-- Homebrew OpenCV installation
-
-**Manual ONNX Runtime path (if needed):**
-
-```bash
-cmake -DONNXRUNTIME_ROOT=/path/to/onnxruntime-osx-arm64-1.23.2 ..
-```
-
-**Debug build with symbols (for profiling):**
-
-```bash
-cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_LOGGING=ON ..
-make
-```
-
-**Faster parallel build:**
-
-```bash
-make -j$(sysctl -n hw.ncpu)
-```
-
-**Clean build when switching configurations:**
-
-```bash
-cd build && rm -rf * && cmake -DENABLE_LOGGING=ON .. && make
-```
+- Model initialization messages
+- CoreML status information
+- Frame processing statistics
 
 ## Running
 
-From the build directory:
+### Run with Default Settings
 
 ```bash
-# Run with default model (movenet_thunder.onnx)
-./build/footstep_tracker
+cargo run --release
+```
 
+Uses default model (`models/movenet_multipose.mlpackage`) and camera 0.
+
+### Specify Model and Camera
+
+```bash
 # Specify model path
-./build/footstep_tracker ../models/movenet_lightning.onnx
+cargo run --release -- models/movenet_multipose.mlmodelc
 
 # Specify model and camera ID
-./build/footstep_tracker ../models/movenet_thunder.onnx 0
+cargo run --release -- models/movenet_multipose.mlpackage 1
 ```
 
 ### Controls
@@ -144,56 +103,137 @@ From the build directory:
 
 ## How It Works
 
-1. **Hardware Acceleration**: ONNX Runtime with CoreML uses Apple's Neural Engine and GPU
-2. **Model Loading**: Loads MoveNet ONNX model (Thunder or Lightning variant)
-3. **Webcam Capture**: OpenCV captures frames using AVFoundation backend
-4. **Preprocessing**: Frames resized to 256x256 and converted to RGB
-5. **Inference**: Model predicts 17 body keypoints with confidence scores
-6. **Visualization**: Draws leg skeleton and highlights ankles in real-time
-7. **Display**: Shows annotated frame with minimal overhead for maximum FPS
+1. **Hardware Acceleration**: CoreML leverages Apple's Neural Engine and GPU via the `coreml-rs` Rust bindings
+2. **Model Loading**: Loads MoveNet Multipose CoreML model (`.mlpackage` or `.mlmodelc` format)
+3. **Webcam Capture**: OpenCV-Rust captures frames using AVFoundation backend
+4. **Preprocessing**: Frames resized to 256x256 and converted to FP16 format
+5. **Inference**: Model predicts 17 body keypoints for up to 6 people simultaneously
+6. **Temporal Smoothing**: Exponential moving average reduces jitter in keypoint positions
+7. **Visualization**: Draws full skeleton with color-coded confidence levels
+8. **Display**: Shows annotated frame with minimal overhead for maximum FPS
 
 ## Keypoint Detection
 
-MoveNet detects 17 body keypoints:
+MoveNet detects 17 body keypoints per person (COCO format):
 
-- Nose, Eyes, Ears
-- Shoulders, Elbows, Wrists
-- Hips, Knees, **Ankles** (highlighted for footstep tracking)
+- **Face**: Nose, Eyes (L/R), Ears (L/R)
+- **Upper Body**: Shoulders (L/R), Elbows (L/R), Wrists (L/R)
+- **Lower Body**: Hips (L/R), Knees (L/R), **Ankles** (L/R)
 
-Each keypoint has:
+Each keypoint contains:
 
-- `x, y` coordinates (normalized 0-1)
+- `y` coordinate (normalized 0-1)
+- `x` coordinate (normalized 0-1)
 - `confidence` score (0-1)
+
+The visualization uses color-coded keypoints:
+
+- **Red** (low confidence) → **Orange** → **Yellow** → **Green** (high confidence)
+
+## Project Structure
+
+```
+src/
+  main.rs              - Application entry point and main loop
+  pose_detector.rs     - CoreML pose detection with temporal smoothing
+  visualization.rs     - Drawing keypoints and skeleton connections
+
+coreml-rs/             - Custom Rust bindings for CoreML framework
+  src/lib.rs           - Main CoreML interface
+  swift-library/       - Swift wrapper for CoreML API
+
+models/                - CoreML model files
+  movenet_multipose.mlpackage/    - MoveNet Multipose model
+
+convert_coreml.py      - Script to convert ONNX models to CoreML
+Cargo.toml             - Rust dependencies and build configuration
+```
+
+## Tech Stack
+
+- **Language**: Rust (2021 edition)
+- **Computer Vision**: OpenCV 0.95 (Rust bindings)
+- **ML Framework**: CoreML via custom `coreml-rs` bindings
+- **Array Processing**: ndarray 0.16
+- **Error Handling**: anyhow 1.0
+- **FP16 Support**: half 2.3
+
+### Why Rust?
+
+The project was rewritten from C++ to Rust for several benefits:
+
+- **Memory Safety**: Eliminates common C++ issues like null pointer dereferences and buffer overflows
+- **Performance**: Zero-cost abstractions and excellent optimization
+- **Ergonomics**: Modern language features (Result types, pattern matching, traits)
+- **Ecosystem**: Cargo for dependency management and building
+- **Concurrency**: Built-in safety for future multi-threading enhancements
+
+## Development
+
+### API Documentation
+
+See [API.md](API.md) for detailed documentation on using the pose detection API in your own Rust projects.
+
+### Running Tests
+
+```bash
+cargo test
+```
+
+### Checking Code
+
+```bash
+# Run clippy for lints
+cargo clippy
+
+# Format code
+cargo fmt
+
+# Check without building
+cargo check
+```
 
 ## Troubleshooting
 
-**CMake can't find ONNX Runtime:**
+**Rust compilation errors:**
 
-- Run `./setup.sh` to download it automatically to `dependencies/` folder
-- Or manually extract `onnxruntime-osx-arm64-{version}.tgz` in `dependencies/` folder
-- Or specify path: `cmake -DONNXRUNTIME_ROOT=/path/to/onnxruntime ..`
+- Ensure Rust is up to date: `rustup update`
+- Check OpenCV installation: `brew info opencv`
+- Set OpenCV path if needed: `export OPENCV_LINK_PATHS=/opt/homebrew/lib`
 
 **Webcam not opening:**
 
 - Check camera permissions: System Settings > Privacy & Security > Camera
-- Try different camera: `./footstep_tracker ../models/movenet_thunder.onnx 1`
-- Check available cameras: `ls /dev/video*` or use QuickTime to test
+- Allow Terminal (or your IDE) to access the camera
+- Try different camera: `cargo run --release -- models/movenet_multipose.mlpackage 1`
+- Use QuickTime Player to verify camera works
 
 **Model file not found:**
 
-- Download from [Kaggle MoveNet Models](https://www.kaggle.com/models/google/movenet)
-- Place ONNX files in `models/` directory
-- Or specify path: `./footstep_tracker /path/to/model.onnx`
+- Ensure model is in `models/` directory
+- Use either `.mlpackage` or `.mlmodelc` format
+- Or specify full path: `cargo run --release -- /path/to/model.mlpackage`
 
 **Low FPS / Performance issues:**
 
-- Ensure CoreML is enabled (check console output for "✓ CoreML acceleration enabled")
-- Use Lightning model for better FPS: `./footstep_tracker ../models/movenet_lightning.onnx`
+- Use release mode: `cargo run --release` (not just `cargo run`)
+- Ensure CoreML is working (check console for initialization messages)
 - Close other applications using camera/GPU
-- Check Activity Monitor for high CPU usage
+- Check Activity Monitor for high CPU/memory usage
 
-**CoreML not working:**
+**CoreML initialization fails:**
 
-- Update to latest macOS version
-- Verify ONNX Runtime version includes CoreML support (1.20.1+)
-- Check console for CoreML initialization messages
+- Update to latest macOS version (CoreML support varies by OS version)
+- Verify model format is correct (`.mlpackage` or `.mlmodelc`)
+- Check model was converted properly for your macOS version
+
+## Additional Resources
+
+- **API Documentation**: See [API.md](API.md) for detailed API usage and code examples
+- **MoveNet Model**: [Google MoveNet on Kaggle](https://www.kaggle.com/models/google/movenet)
+- **CoreML Documentation**: [Apple CoreML](https://developer.apple.com/documentation/coreml)
+- **OpenCV Rust**: [opencv-rust crate](https://crates.io/crates/opencv)
+
+## License
+
+This project uses the MoveNet model which is provided by Google under the Apache 2.0 license.
