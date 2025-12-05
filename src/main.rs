@@ -53,7 +53,18 @@ fn main() -> Result<()> {
         }
 
         // Detect pose and get keypoints for all people
+        #[cfg(feature = "debug")]
+        let start = std::time::Instant::now();
+
         let all_keypoints = detector.detect_pose(&frame)?;
+
+        #[cfg(feature = "debug")]
+        {
+            if detector.frame_counter % 30 == 0 {
+                let duration = start.elapsed();
+                println!("End-to-End Detection time: {:.2?}", duration);
+            }
+        }
 
         // Visualize all keypoints
         draw_all_keypoints(&mut frame, &all_keypoints, 0.1)?;

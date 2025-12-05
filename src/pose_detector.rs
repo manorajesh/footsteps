@@ -39,6 +39,12 @@ pub struct PoseDetectorConfig {
     pub model_input_size: usize,
     pub num_keypoints: usize,
     pub max_people: usize,
+    /// Confidence threshold below which we use temporal smoothing more aggressively
+    pub low_confidence_threshold: f32,
+    /// Smoothing factor for exponential moving average (0.0 = use only current, 1.0 = use only previous)
+    pub smoothing_alpha: f32,
+    /// Smoothing factor when confidence is low (higher = more smoothing)
+    pub low_confidence_alpha: f32,
 }
 
 impl Default for PoseDetectorConfig {
@@ -48,16 +54,21 @@ impl Default for PoseDetectorConfig {
             model_input_size: 256,
             num_keypoints: 17,
             max_people: 6,
+            low_confidence_threshold: 0.5,
+            smoothing_alpha: 0.3,
+            low_confidence_alpha: 0.7,
         }
     }
 }
 
-/// Pose detector using CoreML
+/// Pose detector using CoreML with temporal smoothing
 pub struct PoseDetector {
     config: PoseDetectorConfig,
     model: CoreMLModelWithState,
+    /// Previous frame's keypoints for temporal smoothing
+    previous_keypoints: Option<MultiPoseKeypoints>,
     #[cfg(feature = "debug")]
-    frame_counter: usize,
+    pub frame_counter: usize,
 }
 
 impl PoseDetector {
@@ -81,11 +92,12 @@ impl PoseDetector {
         }
 
         #[cfg(feature = "debug")]
-        println!("✓ Pose Detector ready!");
+        println!("✓ Pose Detector ready with temporal smoothing!");
 
         Ok(Self {
             config,
             model,
+            previous_keypoints: None,
             #[cfg(feature = "debug")]
             frame_counter: 0,
         })
@@ -198,6 +210,157 @@ impl PoseDetector {
             all_keypoints.push(person_keypoints);
         }
 
-        Ok(all_keypoints)
+        // Apply temporal smoothing
+        let smoothed_keypoints = self.apply_temporal_smoothing(all_keypoints);
+
+        // Store for next frame
+        self.previous_keypoints = Some(smoothed_keypoints.clone());
+
+        Ok(smoothed_keypoints)
+    }
+
+    /// Apply temporal smoothing to reduce jitter
+    /// Uses exponential moving average with confidence-based fallback
+    /// Handles new people entering/exiting by matching based on spatial proximity
+    fn apply_temporal_smoothing(&self, current: MultiPoseKeypoints) -> MultiPoseKeypoints {
+        // If no previous frame, return current as-is
+        let Some(ref previous) = self.previous_keypoints else {
+            return current;
+        };
+
+        // If no people detected, return current
+        if current.is_empty() {
+            return current;
+        }
+
+        let mut smoothed = Vec::new();
+
+        for current_person in current.iter() {
+            // Find the best matching person from previous frame based on center of mass
+            let best_match = self.find_best_match(current_person, previous);
+
+            if let Some(prev_person) = best_match {
+                let mut smoothed_person = Vec::new();
+
+                for (kp_idx, current_kp) in current_person.iter().enumerate() {
+                    let prev_kp = prev_person.get(kp_idx);
+
+                    if let Some(&prev) = prev_kp {
+                        let confidence = current_kp[2];
+
+                        // Determine smoothing factor based on confidence
+                        let alpha = if confidence < self.config.low_confidence_threshold {
+                            // Low confidence: use more of previous frame
+                            self.config.low_confidence_alpha
+                        } else {
+                            // High confidence: use less of previous frame
+                            self.config.smoothing_alpha
+                        };
+
+                        // Apply exponential moving average
+                        // smoothed = alpha * previous + (1 - alpha) * current
+                        let smoothed_kp = [
+                            alpha * prev[0] + (1.0 - alpha) * current_kp[0], // y
+                            alpha * prev[1] + (1.0 - alpha) * current_kp[1], // x
+                            current_kp[2], // keep current confidence
+                        ];
+
+                        smoothed_person.push(smoothed_kp);
+                    } else {
+                        // No previous keypoint, use current
+                        smoothed_person.push(*current_kp);
+                    }
+                }
+
+                smoothed.push(smoothed_person);
+            } else {
+                // No matching previous person (new person entering frame)
+                // Use current detection without smoothing
+                smoothed.push(current_person.clone());
+            }
+        }
+
+        smoothed
+    }
+
+    /// Find the best matching person from previous frame based on center of mass
+    /// Returns None if no good match is found (person is new to the frame)
+    fn find_best_match<'a>(
+        &self,
+        current_person: &Keypoints,
+        previous: &'a MultiPoseKeypoints
+    ) -> Option<&'a Keypoints> {
+        if previous.is_empty() {
+            return None;
+        }
+
+        // Calculate center of mass for current person (using high-confidence keypoints)
+        let current_center = self.calculate_center_of_mass(current_person);
+        if current_center.is_none() {
+            // Not enough confident keypoints, don't smooth
+            return None;
+        }
+        let (curr_y, curr_x) = current_center.unwrap();
+
+        // Find closest person in previous frame
+        let mut best_match: Option<(usize, f32)> = None;
+
+        for (idx, prev_person) in previous.iter().enumerate() {
+            let prev_center = self.calculate_center_of_mass(prev_person);
+            if let Some((prev_y, prev_x)) = prev_center {
+                // Calculate Euclidean distance
+                let distance = ((curr_y - prev_y).powi(2) + (curr_x - prev_x).powi(2)).sqrt();
+
+                // Keep track of closest match
+                if let Some((_, best_dist)) = best_match {
+                    if distance < best_dist {
+                        best_match = Some((idx, distance));
+                    }
+                } else {
+                    best_match = Some((idx, distance));
+                }
+            }
+        }
+
+        // Only return match if distance is reasonable (not too far apart)
+        // Threshold of 0.3 means person moved less than 30% of frame size
+        if let Some((idx, distance)) = best_match {
+            if distance < 0.3 {
+                return Some(&previous[idx]);
+            }
+        }
+
+        None
+    }
+
+    /// Calculate center of mass using high-confidence keypoints
+    /// Returns (y, x) coordinates normalized to [0, 1]
+    fn calculate_center_of_mass(&self, person: &Keypoints) -> Option<(f32, f32)> {
+        let mut sum_y = 0.0;
+        let mut sum_x = 0.0;
+        let mut count = 0;
+
+        for kp in person.iter() {
+            let confidence = kp[2];
+            // Only use keypoints with reasonable confidence
+            if confidence > 0.3 {
+                sum_y += kp[0];
+                sum_x += kp[1];
+                count += 1;
+            }
+        }
+
+        if count > 0 {
+            Some((sum_y / (count as f32), sum_x / (count as f32)))
+        } else {
+            None
+        }
+    }
+
+    /// Reset temporal smoothing (useful when scene changes drastically)
+    pub fn reset_smoothing(&mut self) {
+        self.previous_keypoints = None;
+        #[cfg(feature = "debug")]
+        println!("Temporal smoothing reset");
     }
 }
