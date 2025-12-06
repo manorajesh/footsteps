@@ -27,6 +27,8 @@ pub enum Keypoint {
     RightAnkle = 16,
 }
 
+const CONFIDENCE_THRESHOLD: f32 = 0.2;
+
 /// Each keypoint contains (y, x, confidence)
 pub type KeypointData = [f32; 3];
 pub type Keypoints = Vec<KeypointData>;
@@ -194,7 +196,7 @@ impl PoseDetector {
             let detection_score = output_data[person_offset + 55];
 
             // Skip people with low detection confidence
-            if detection_score < 0.3 {
+            if detection_score < CONFIDENCE_THRESHOLD {
                 continue;
             }
 
@@ -343,7 +345,7 @@ impl PoseDetector {
         for kp in person.iter() {
             let confidence = kp[2];
             // Only use keypoints with reasonable confidence
-            if confidence > 0.3 {
+            if confidence > CONFIDENCE_THRESHOLD {
                 sum_y += kp[0];
                 sum_x += kp[1];
                 count += 1;

@@ -8,6 +8,11 @@ use pose_detector::{ PoseDetector, PoseDetectorConfig };
 use visualization::{ draw_all_keypoints, draw_footsteps };
 use footstep_tracker::FootstepTracker;
 
+enum VideoSource {
+    Webcam(i32),
+    File(String),
+}
+
 fn main() -> Result<()> {
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
@@ -18,7 +23,20 @@ fn main() -> Result<()> {
         "models/movenet_multipose.mlpackage".to_string()
     };
 
-    let camera_id = if args.len() > 2 { args[2].parse().unwrap_or(0) } else { 0 };
+    // Determine video source: file path or camera ID
+    let video_source = if args.len() > 2 {
+        let arg = &args[2];
+        // Check if it's a file path (contains '.' or '/')
+        if arg.contains('.') || arg.contains('/') {
+            VideoSource::File(arg.clone())
+        } else {
+            // Try to parse as camera ID
+            let camera_id = arg.parse().unwrap_or(0);
+            VideoSource::Webcam(camera_id)
+        }
+    } else {
+        VideoSource::Webcam(0)
+    };
 
     // Configure and initialize the pose detector
     let config = PoseDetectorConfig {
@@ -31,18 +49,54 @@ fn main() -> Result<()> {
     // Initialize footstep tracker (footsteps visible for 5 seconds)
     let mut footstep_tracker = FootstepTracker::new(5);
 
-    // Open webcam with AVFoundation backend (better for macOS)
-    let mut cap = videoio::VideoCapture
-        ::new(camera_id, videoio::CAP_AVFOUNDATION)
-        .context("Failed to open video capture")?;
+    // Open video source and get FPS for video files
+    let (mut cap, video_fps) = match &video_source {
+        VideoSource::Webcam(camera_id) => {
+            println!("Opening camera {}...", camera_id);
+            let cap = videoio::VideoCapture
+                ::new(*camera_id, videoio::CAP_AVFOUNDATION)
+                .context("Failed to open video capture")?;
 
-    if !videoio::VideoCapture::is_opened(&cap)? {
-        eprintln!("Error: Could not open camera {}", camera_id);
-        eprintln!(
-            "Try a different camera ID with: cargo run --release -- models/movenet_multipose.mlpackage <camera_id>"
-        );
-        return Ok(());
-    }
+            if !videoio::VideoCapture::is_opened(&cap)? {
+                eprintln!("Error: Could not open camera {}", camera_id);
+                eprintln!(
+                    "Try a different camera ID with: cargo run --release -- <model_path> <camera_id>"
+                );
+                return Ok(());
+            }
+            (cap, None)
+        }
+        VideoSource::File(path) => {
+            println!("Opening video file: {}", path);
+            let cap = videoio::VideoCapture
+                ::from_file(path, videoio::CAP_ANY)
+                .context("Failed to open video file")?;
+
+            if !videoio::VideoCapture::is_opened(&cap)? {
+                eprintln!("Error: Could not open video file: {}", path);
+                eprintln!("Make sure the file exists and is a valid video format");
+                return Ok(());
+            }
+
+            let fps = cap.get(videoio::CAP_PROP_FPS)?;
+            let frame_count = cap.get(videoio::CAP_PROP_FRAME_COUNT)?;
+            println!("Video: {:.1} FPS, {} frames", fps, frame_count as i32);
+            (cap, Some(fps))
+        }
+    };
+
+    let is_video_file = matches!(video_source, VideoSource::File(_));
+
+    // Calculate delay for video playback (in milliseconds)
+    let frame_delay = if let Some(fps) = video_fps {
+        if fps > 0.0 {
+            (1000.0 / fps) as i32
+        } else {
+            30 // fallback to ~30 FPS
+        }
+    } else {
+        1 // For webcam, minimal delay
+    };
 
     println!("Press 'q' to quit");
 
@@ -54,7 +108,19 @@ fn main() -> Result<()> {
         cap.read(&mut frame)?;
 
         if frame.empty() {
-            break;
+            // If it's a video file, loop back to the beginning
+            if is_video_file {
+                println!("Looping video...");
+                cap.set(videoio::CAP_PROP_POS_FRAMES, 0.0)?;
+                cap.read(&mut frame)?;
+
+                // If still empty after reset, break
+                if frame.empty() {
+                    break;
+                }
+            } else {
+                break;
+            }
         }
 
         // Detect pose and get keypoints for all people
@@ -83,8 +149,8 @@ fn main() -> Result<()> {
 
         highgui::imshow(window_name, &frame)?;
 
-        // Break on 'q' key
-        if highgui::wait_key(1)? == (b'q' as i32) {
+        // Break on 'q' key - use appropriate delay for video playback
+        if highgui::wait_key(frame_delay)? == (b'q' as i32) {
             break;
         }
     }

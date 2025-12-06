@@ -79,7 +79,7 @@ This enables:
 
 ## Running
 
-### Run with Default Settings
+### Run with Default Settings (Webcam)
 
 ```bash
 cargo run --release
@@ -96,6 +96,18 @@ cargo run --release -- models/movenet_multipose.mlmodelc
 # Specify model and camera ID
 cargo run --release -- models/movenet_multipose.mlpackage 1
 ```
+
+### Run with Video File (Looping)
+
+```bash
+# Use an MP4 video file instead of webcam
+cargo run --release -- models/movenet_multipose.mlpackage video.mp4
+
+# Or with full path
+cargo run --release -- models/movenet_multipose.mlpackage /path/to/video.mp4
+```
+
+The video will automatically loop when it reaches the end. The program detects video files by the presence of `.` or `/` in the argument.
 
 ### Controls
 
