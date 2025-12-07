@@ -19,6 +19,8 @@ clap = { version = "4.5.53", features = ["derive"] }
 opt-level = 3
 lto = true
 codegen-units = 1
+panic = "abort"
+strip = "debuginfo"
 
 
 [features]

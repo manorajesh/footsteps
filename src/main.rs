@@ -40,8 +40,8 @@ enum VideoSource {
 #[command(name = "footstep-tracker", about = "Footstep tracking demo", version, author)]
 struct Args {
     /// Path to the CoreML pose detection model package
-    #[arg(default_value = "models/rtmpose.mlpackage", value_name = "MODEL_PATH")]
-    model_path: String,
+    #[arg(short, long, value_name = "MODEL_PATH")]
+    model_path: Option<String>,
 
     /// Video source: camera ID (e.g., 0) or video file path
     #[arg(
@@ -68,7 +68,7 @@ fn main() -> Result<()> {
     init_tracing();
 
     let args = Args::parse();
-    let model_path = args.model_path;
+    let model_path = args.model_path.unwrap_or_else(|| "models/rtmpose.mlpackage".to_string());
     let video_source = args.video;
 
     // Configure and initialize the YOLO person detector
