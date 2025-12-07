@@ -1,251 +1,110 @@
 # Footstep Tracker
 
-A real-time footstep tracking application using MoveNet pose estimation with CoreML acceleration, written in Rust with OpenCV bindings.
+Real-time multi-person footstep detection on macOS using CoreML (YOLOv11 for person boxes + RTMPose for 17-keypoint pose) with OpenCV and Rust.
 
-## Features
+## What it does
 
-- Real-time multi-person pose estimation using MoveNet Multipose model
-- Hardware acceleration via Apple's CoreML (Neural Engine + GPU)
-- Webcam capture and processing with AVFoundation backend
-- Visual tracking of all body keypoints and skeleton connections
-- Temporal smoothing for stable keypoint tracking
-- Optimized for performance on Apple Silicon Macs
-- Written in Rust for safety and performance
+- Runs fully on-device with CoreML (CPU + Apple Neural Engine when available)
+- Detects people with a YOLOv11 CoreML model (`models/yolo11n.mlpackage`)
+- Estimates 17 COCO keypoints per person with an RTMPose SimCC CoreML model (`models/rtmpose.mlpackage`)
+- Tracks per-person IDs and emits footsteps when ankles stop after moving
+- Optional UDP output of footsteps for downstream consumers (e.g., Unity/TouchDesigner)
+- Works with webcam or video files; video sources loop automatically
 
-## Prerequisites
+## Requirements (macOS)
 
-### macOS (Apple Silicon or Intel)
+- Rust toolchain: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+- OpenCV: `brew install opencv`
+- macOS with CoreML available (runs best on Apple Silicon); allow camera access for the terminal/IDE
 
-Required dependencies:
+## Models
 
-- **Rust**: Install from [rustup.rs](https://rustup.rs/)
+- Provided: `models/rtmpose.mlpackage` (256x192 RTMPose-SimCC, 17 keypoints)
+- Provided: `models/yolo11n.mlpackage` (person detector)
+- You can swap in your own CoreML `.mlpackage`/`.mlmodelc` files with matching inputs; place them in `models/` and point the CLI at the path.
+
+## Build
+
+- Release (recommended for FPS):
 
   ```bash
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+  cargo build --release
   ```
 
-- **OpenCV**: Install via Homebrew
+- Dev build:
+
   ```bash
-  brew install opencv
+  cargo build
   ```
 
-### MoveNet Models
+- Debug logs (timings, model info):
 
-The project uses MoveNet Multipose model in CoreML format. You can either:
+  ```bash
+  cargo build --release --features debug
+  ```
 
-1. **Use the included model**: The repository includes a pre-converted `movenet_multipose.mlpackage`
+## Run
 
-2. **Convert from ONNX** (optional): Use the provided `convert_coreml.py` script:
-   ```bash
-   pip install coremltools onnx
-   python convert_coreml.py
-   ```
+- Webcam with defaults (RTMPose + YOLO, camera 0):
 
-## Building the Project
+  ```bash
+  cargo run --release
+  ```
 
-### Quick Build (Release Mode)
+- Specify model and source (camera index or video path):
 
-```bash
-cargo build --release
-```
+  ```bash
+  # camera 1
+  cargo run --release -- models/rtmpose.mlpackage 1
 
-This will:
+  # mp4 file (auto-loops)
+  cargo run --release -- models/rtmpose.mlpackage /path/to/video.mp4
+  ```
 
-- Compile with full optimizations (`opt-level = 3`)
-- Enable Link-Time Optimization (LTO)
-- Create binary at `target/release/footstep-tracker`
+- UDP output for footsteps (sends `"<x> <y>"` normalized to 0-1):
 
-### Development Build
+  ```bash
+  FOOTSTEP_UDP_ADDR=192.168.1.42:5005 cargo run --release -- models/rtmpose.mlpackage
+  ```
 
-```bash
-cargo build
-```
+- Controls: press `q` to quit.
 
-Faster compilation for development, with debug symbols.
+## How it works
 
-### Build with Debug Logging
+1. Capture frames from AVFoundation (webcam) or video file
+2. Run YOLOv11 CoreML to get person boxes (normalized)
+3. Track stable person IDs across frames
+4. Crop each person box, resize to 256x192, run RTMPose SimCC CoreML to get 17 keypoints
+5. Map keypoints back to full-frame coordinates
+6. Detect footsteps when ankles transition from moving to still; keep recent trails and archive past visitors
+7. Draw IDs, boxes, and footsteps (color-coded per person) and optionally emit UDP events
 
-Enable verbose logging for debugging:
+## Coordinates
 
-```bash
-cargo build --release --features debug
-```
+- Keypoints and footsteps are normalized to the frame: `x` and `y` are in `[0,1]`.
+- UDP payload per footstep: `<x> <y>` on a single line (e.g., `0.4123 0.7831`).
 
-This enables:
-
-- Model initialization messages
-- CoreML status information
-- Frame processing statistics
-
-## Running
-
-### Run with Default Settings (Webcam)
-
-```bash
-cargo run --release
-```
-
-Uses default model (`models/movenet_multipose.mlpackage`) and camera 0.
-
-### Specify Model and Camera
-
-```bash
-# Specify model path
-cargo run --release -- models/movenet_multipose.mlmodelc
-
-# Specify model and camera ID
-cargo run --release -- models/movenet_multipose.mlpackage 1
-```
-
-### Run with Video File (Looping)
-
-```bash
-# Use an MP4 video file instead of webcam
-cargo run --release -- models/movenet_multipose.mlpackage video.mp4
-
-# Or with full path
-cargo run --release -- models/movenet_multipose.mlpackage /path/to/video.mp4
-```
-
-The video will automatically loop when it reaches the end. The program detects video files by the presence of `.` or `/` in the argument.
-
-### Controls
-
-- **q**: Quit the application
-
-## How It Works
-
-1. **Hardware Acceleration**: CoreML leverages Apple's Neural Engine and GPU via the `coreml-rs` Rust bindings
-2. **Model Loading**: Loads MoveNet Multipose CoreML model (`.mlpackage` or `.mlmodelc` format)
-3. **Webcam Capture**: OpenCV-Rust captures frames using AVFoundation backend
-4. **Preprocessing**: Frames resized to 256x256 and converted to FP16 format
-5. **Inference**: Model predicts 17 body keypoints for up to 6 people simultaneously
-6. **Temporal Smoothing**: Exponential moving average reduces jitter in keypoint positions
-7. **Visualization**: Draws full skeleton with color-coded confidence levels
-8. **Display**: Shows annotated frame with minimal overhead for maximum FPS
-
-## Keypoint Detection
-
-MoveNet detects 17 body keypoints per person (COCO format):
-
-- **Face**: Nose, Eyes (L/R), Ears (L/R)
-- **Upper Body**: Shoulders (L/R), Elbows (L/R), Wrists (L/R)
-- **Lower Body**: Hips (L/R), Knees (L/R), **Ankles** (L/R)
-
-Each keypoint contains:
-
-- `y` coordinate (normalized 0-1)
-- `x` coordinate (normalized 0-1)
-- `confidence` score (0-1)
-
-The visualization uses color-coded keypoints:
-
-- **Red** (low confidence) → **Orange** → **Yellow** → **Green** (high confidence)
-
-## Project Structure
+## Project structure
 
 ```
 src/
-  main.rs              - Application entry point and main loop
-  pose_detector.rs     - CoreML pose detection with temporal smoothing
-  visualization.rs     - Drawing keypoints and skeleton connections
+  main.rs            - CLI/entrypoint, capture loop, UDP hook
+  person_detector.rs - YOLOv11 CoreML person detector + ID tracker
+  pose_detector.rs   - RTMPose SimCC CoreML inference
+  footstep_tracker.rs- Ankle-motion based footstep detection & history
+  visualization.rs   - Drawing boxes, footsteps, and (optional) keypoints
 
-coreml-rs/             - Custom Rust bindings for CoreML framework
-  src/lib.rs           - Main CoreML interface
-  swift-library/       - Swift wrapper for CoreML API
-
-models/                - CoreML model files
-  movenet_multipose.mlpackage/    - MoveNet Multipose model
-
-convert_coreml.py      - Script to convert ONNX models to CoreML
-Cargo.toml             - Rust dependencies and build configuration
-```
-
-## Tech Stack
-
-- **Language**: Rust (2021 edition)
-- **Computer Vision**: OpenCV 0.95 (Rust bindings)
-- **ML Framework**: CoreML via custom `coreml-rs` bindings
-- **Array Processing**: ndarray 0.16
-- **Error Handling**: anyhow 1.0
-- **FP16 Support**: half 2.3
-
-### Why Rust?
-
-The project was rewritten from C++ to Rust for several benefits:
-
-- **Memory Safety**: Eliminates common C++ issues like null pointer dereferences and buffer overflows
-- **Performance**: Zero-cost abstractions and excellent optimization
-- **Ergonomics**: Modern language features (Result types, pattern matching, traits)
-- **Ecosystem**: Cargo for dependency management and building
-- **Concurrency**: Built-in safety for future multi-threading enhancements
-
-## Development
-
-### API Documentation
-
-See [API.md](API.md) for detailed documentation on using the pose detection API in your own Rust projects.
-
-### Running Tests
-
-```bash
-cargo test
-```
-
-### Checking Code
-
-```bash
-# Run clippy for lints
-cargo clippy
-
-# Format code
-cargo fmt
-
-# Check without building
-cargo check
+coreml-rs/           - Local CoreML bindings (Swift + Rust bridge)
+models/              - CoreML model packages (YOLO + RTMPose provided)
 ```
 
 ## Troubleshooting
 
-**Rust compilation errors:**
-
-- Ensure Rust is up to date: `rustup update`
-- Check OpenCV installation: `brew info opencv`
-- Set OpenCV path if needed: `export OPENCV_LINK_PATHS=/opt/homebrew/lib`
-
-**Webcam not opening:**
-
-- Check camera permissions: System Settings > Privacy & Security > Camera
-- Allow Terminal (or your IDE) to access the camera
-- Try different camera: `cargo run --release -- models/movenet_multipose.mlpackage 1`
-- Use QuickTime Player to verify camera works
-
-**Model file not found:**
-
-- Ensure model is in `models/` directory
-- Use either `.mlpackage` or `.mlmodelc` format
-- Or specify full path: `cargo run --release -- /path/to/model.mlpackage`
-
-**Low FPS / Performance issues:**
-
-- Use release mode: `cargo run --release` (not just `cargo run`)
-- Ensure CoreML is working (check console for initialization messages)
-- Close other applications using camera/GPU
-- Check Activity Monitor for high CPU/memory usage
-
-**CoreML initialization fails:**
-
-- Update to latest macOS version (CoreML support varies by OS version)
-- Verify model format is correct (`.mlpackage` or `.mlmodelc`)
-- Check model was converted properly for your macOS version
-
-## Additional Resources
-
-- **API Documentation**: See [API.md](API.md) for detailed API usage and code examples
-- **MoveNet Model**: [Google MoveNet on Kaggle](https://www.kaggle.com/models/google/movenet)
-- **CoreML Documentation**: [Apple CoreML](https://developer.apple.com/documentation/coreml)
-- **OpenCV Rust**: [opencv-rust crate](https://crates.io/crates/opencv)
+- OpenCV not found: `brew reinstall opencv` and ensure Homebrew is on your PATH (`eval "$($(brew --prefix)/bin/brew shellenv)"`).
+- Webcam fails: check macOS camera permissions and try another index (`cargo run --release -- models/rtmpose.mlpackage 1`).
+- CoreML load error: verify the `.mlpackage`/`.mlmodelc` path exists and you are on macOS with CoreML available.
+- Low FPS: prefer `--release`, close other GPU/NE heavy apps, and keep the preview window small.
 
 ## License
 
-This project uses the MoveNet model which is provided by Google under the Apache 2.0 license.
+Model licenses follow their respective sources (YOLOv11 and RTMPose). Code is under the repository license.
