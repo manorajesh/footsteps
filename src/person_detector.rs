@@ -1,6 +1,7 @@
 use anyhow::Result;
 use opencv::{ core, imgproc, prelude::* };
 use coreml_rs::{ CoreMLModelOptions, CoreMLModelWithState, ComputePlatform };
+use std::collections::HashMap;
 
 /// COCO class ID for person
 const PERSON_CLASS_ID: usize = 0;
@@ -46,6 +47,43 @@ impl BoundingBox {
             confidence: self.confidence,
         }
     }
+
+    pub fn iou(&self, other: &Self) -> f32 {
+        let (x1, y1, w1, h1) = (
+            self.x - self.width * 0.5,
+            self.y - self.height * 0.5,
+            self.width,
+            self.height,
+        );
+        let (x2, y2, w2, h2) = (
+            other.x - other.width * 0.5,
+            other.y - other.height * 0.5,
+            other.width,
+            other.height,
+        );
+
+        let inter_x1 = x1.max(x2);
+        let inter_y1 = y1.max(y2);
+        let inter_x2 = (x1 + w1).min(x2 + w2);
+        let inter_y2 = (y1 + h1).min(y2 + h2);
+
+        let inter_w = (inter_x2 - inter_x1).max(0.0);
+        let inter_h = (inter_y2 - inter_y1).max(0.0);
+        let inter_area = inter_w * inter_h;
+
+        let union_area = w1 * h1 + w2 * h2 - inter_area;
+        if union_area <= 0.0 {
+            0.0
+        } else {
+            inter_area / union_area
+        }
+    }
+
+    pub fn center_distance2(&self, other: &Self) -> f32 {
+        let dx = self.x - other.x;
+        let dy = self.y - other.y;
+        dx * dx + dy * dy
+    }
 }
 
 /// Configuration for YOLO person detector
@@ -70,6 +108,20 @@ impl Default for YoloDetectorConfig {
 pub struct YoloDetector {
     config: YoloDetectorConfig,
     model: CoreMLModelWithState,
+}
+
+#[derive(Debug, Clone)]
+struct Track {
+    id: usize,
+    bbox: BoundingBox,
+    age: usize,
+}
+
+/// Lightweight tracker to keep person IDs consistent across frames
+pub struct PersonTracker {
+    tracks: HashMap<usize, Track>,
+    next_id: usize,
+    max_age: usize,
 }
 
 impl YoloDetector {
@@ -214,5 +266,77 @@ impl YoloDetector {
         imgproc::resize(&cropped, &mut resized, size, 0.0, 0.0, imgproc::INTER_LINEAR)?;
 
         Ok(resized)
+    }
+}
+
+impl PersonTracker {
+    pub fn new(max_age: usize) -> Self {
+        Self {
+            tracks: HashMap::new(),
+            next_id: 0,
+            max_age,
+        }
+    }
+
+    pub fn assign_ids(&mut self, detections: Vec<BoundingBox>) -> Vec<(usize, BoundingBox)> {
+        let mut results = Vec::with_capacity(detections.len());
+
+        // Mark all tracks as aged by default
+        for track in self.tracks.values_mut() {
+            track.age += 1;
+        }
+
+        let mut used_tracks = std::collections::HashSet::new();
+
+        for det in detections.into_iter() {
+            // Find best matching track by IoU, fallback to center distance
+            let mut best: Option<(usize, f32, f32)> = None; // (id, iou, dist2)
+
+            for (id, track) in self.tracks.iter() {
+                if used_tracks.contains(id) {
+                    continue;
+                }
+
+                let iou = det.iou(&track.bbox);
+                let dist2 = det.center_distance2(&track.bbox);
+
+                // Prefer IoU; if multiple, pick highest IoU then smallest distance
+                if iou > 0.3 || dist2 < 0.02 * 0.02 {
+                    match best {
+                        Some((_, best_iou, best_dist2)) => {
+                            if iou > best_iou || (iou == best_iou && dist2 < best_dist2) {
+                                best = Some((*id, iou, dist2));
+                            }
+                        }
+                        None => {
+                            best = Some((*id, iou, dist2));
+                        }
+                    }
+                }
+            }
+
+            let assigned_id = if let Some((id, _, _)) = best {
+                used_tracks.insert(id);
+                id
+            } else {
+                let id = self.next_id;
+                self.next_id += 1;
+                id
+            };
+
+            // Update or insert track
+            self.tracks.insert(assigned_id, Track {
+                id: assigned_id,
+                bbox: det.clone(),
+                age: 0,
+            });
+
+            results.push((assigned_id, det));
+        }
+
+        // Drop stale tracks
+        self.tracks.retain(|_, track| track.age <= self.max_age);
+
+        results
     }
 }

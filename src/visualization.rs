@@ -233,11 +233,11 @@ pub fn draw_footsteps(
 }
 
 /// Draw bounding boxes from person detection
-pub fn draw_bounding_boxes(frame: &mut Mat, bboxes: &[BoundingBox]) -> Result<()> {
+pub fn draw_bounding_boxes(frame: &mut Mat, bboxes: &[(usize, BoundingBox)]) -> Result<()> {
     let height = frame.rows();
     let width = frame.cols();
 
-    for (idx, bbox) in bboxes.iter().enumerate() {
+    for (idx, (id, bbox)) in bboxes.iter().enumerate() {
         let (x, y, w, h) = bbox.to_pixels(width, height);
 
         // Choose color based on confidence
@@ -253,7 +253,7 @@ pub fn draw_bounding_boxes(frame: &mut Mat, bboxes: &[BoundingBox]) -> Result<()
         imgproc::rectangle(frame, core::Rect::new(x, y, w, h), color, 2, imgproc::LINE_8, 0)?;
 
         // Draw label with confidence
-        let label = format!("Person {} ({:.0}%)", idx + 1, bbox.confidence * 100.0);
+        let label = format!("ID {} ({:.0}%)", id, bbox.confidence * 100.0);
         let font_face = imgproc::FONT_HERSHEY_SIMPLEX;
         let font_scale = 0.6;
         let thickness = 2;

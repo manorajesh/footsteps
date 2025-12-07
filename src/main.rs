@@ -8,7 +8,7 @@ use opencv::{ highgui, prelude::*, videoio };
 use pose_detector::{ PoseDetector, PoseDetectorConfig, Keypoints };
 use visualization::{ draw_all_keypoints, draw_all_ankles, draw_footsteps, draw_bounding_boxes };
 use footstep_tracker::FootstepTracker;
-use person_detector::{ YoloDetector, YoloDetectorConfig, BoundingBox };
+use person_detector::{ YoloDetector, YoloDetectorConfig, BoundingBox, PersonTracker };
 
 enum VideoSource {
     Webcam(i32),
@@ -58,6 +58,9 @@ fn main() -> Result<()> {
 
     // Initialize footstep tracker (footsteps visible for 5 seconds)
     let mut footstep_tracker = FootstepTracker::new(5);
+
+    // Stable ID tracker for person boxes
+    let mut id_tracker = PersonTracker::new(30);
 
     // Open video source and get FPS for video files
     let (mut cap, video_fps) = match &video_source {
@@ -138,6 +141,7 @@ fn main() -> Result<()> {
         let start = std::time::Instant::now();
 
         let people = person_detector.detect_people(&frame)?;
+        let people_with_ids = id_tracker.assign_ids(people);
 
         #[cfg(feature = "debug")]
         {
@@ -151,7 +155,9 @@ fn main() -> Result<()> {
         let mut all_keypoints: Vec<Keypoints> = Vec::new();
         let mut expanded_bboxes: Vec<BoundingBox> = Vec::new();
 
-        for (person_idx, bbox) in people.iter().enumerate() {
+        let mut keyed_keypoints: Vec<(usize, Keypoints)> = Vec::new();
+
+        for (person_idx, (person_id, bbox)) in people_with_ids.iter().enumerate() {
             // Expand bounding box slightly for better coverage
             let expanded_bbox = bbox.expand(1.4);
             expanded_bboxes.push(expanded_bbox.clone());
@@ -177,7 +183,7 @@ fn main() -> Result<()> {
                     kp[0] = (kp[0] * (h as f32) + (y as f32)) / (frame.rows() as f32);
                 }
 
-                all_keypoints.push(person_keypoints.clone());
+                keyed_keypoints.push((*person_id, person_keypoints.clone()));
             }
 
             #[cfg(feature = "debug")]
@@ -201,14 +207,14 @@ fn main() -> Result<()> {
         }
 
         // Update footstep tracking
-        footstep_tracker.update(&all_keypoints);
+        footstep_tracker.update(&keyed_keypoints);
 
         // Draw expanded bounding boxes (used for pose detection)
-        draw_bounding_boxes(&mut frame, &expanded_bboxes)?;
+        draw_bounding_boxes(&mut frame, &people_with_ids)?;
 
         // Visualize all keypoints
         // draw_all_keypoints(&mut frame, &all_keypoints, 0.1)?;
-        draw_all_ankles(&mut frame, &all_keypoints, 0.1)?;
+        // draw_all_ankles(&mut frame, &all_keypoints, 0.1)?;
 
         // Draw footsteps
         let all_footsteps = footstep_tracker.get_all_footsteps();
@@ -217,7 +223,7 @@ fn main() -> Result<()> {
         highgui::imshow(window_name, &frame)?;
 
         // Break on 'q' key - use appropriate delay for video playback
-        if highgui::wait_key(frame_delay)? == (b'q' as i32) {
+        if highgui::wait_key(1)? == (b'q' as i32) {
             break;
         }
     }

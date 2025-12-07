@@ -1,4 +1,4 @@
-use crate::pose_detector::{ Keypoint, MultiPoseKeypoints };
+use crate::pose_detector::{ Keypoint, Keypoints };
 use std::collections::HashMap;
 
 const COOLDOWN_FRAMES: usize = 10;
@@ -135,15 +135,11 @@ impl FootstepTracker {
         }
     }
 
-    /// Update with new frame's keypoints
-    pub fn update(&mut self, all_keypoints: &MultiPoseKeypoints) {
-        // Match current detections to existing trackers based on person index
-        // In a more sophisticated system, we'd match based on position/ID
-
-        for (person_idx, person_keypoints) in all_keypoints.iter().enumerate() {
-            // Get or create tracker for this person
+    /// Update with new frame's keypoints paired with stable IDs
+    pub fn update(&mut self, keyed_keypoints: &[(usize, Keypoints)]) {
+        for (person_id, person_keypoints) in keyed_keypoints.iter() {
             let tracker = self.person_trackers
-                .entry(person_idx)
+                .entry(*person_id)
                 .or_insert_with(PersonFootstepTracker::new);
 
             // Extract ankle and hip positions
@@ -158,14 +154,12 @@ impl FootstepTracker {
                 (left_hip[2] + right_hip[2]) * 0.5,
             );
 
-            // Update tracker
             tracker.update(
                 (left_ankle[0], left_ankle[1], left_ankle[2]),
                 (right_ankle[0], right_ankle[1], right_ankle[2]),
                 pelvis
             );
 
-            // Cleanup old footsteps
             tracker.cleanup_old_footsteps(self.footstep_display_duration);
         }
     }
