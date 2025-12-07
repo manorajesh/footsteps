@@ -11,6 +11,13 @@ pub struct Footstep {
     pub foot: Foot,
 }
 
+/// Footstep event paired with person ID for downstream consumers (e.g., UDP output)
+#[derive(Debug, Clone)]
+pub struct FootstepEvent {
+    pub person_id: usize,
+    pub footstep: Footstep,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Foot {
     Left,
@@ -242,9 +249,10 @@ impl FootstepTracker {
     }
 
     /// Update with new frame's keypoints paired with stable IDs
-    pub fn update(&mut self, keyed_keypoints: &[(usize, Keypoints)]) {
+    pub fn update(&mut self, keyed_keypoints: &[(usize, Keypoints)]) -> Vec<FootstepEvent> {
         let now = Instant::now();
         let mut active_ids: HashSet<usize> = HashSet::new();
+        let mut new_events = Vec::new();
 
         for (person_id, person_keypoints) in keyed_keypoints.iter() {
             active_ids.insert(*person_id);
@@ -280,6 +288,11 @@ impl FootstepTracker {
                     step.timestamp,
                     self.max_match_distance
                 );
+
+                new_events.push(FootstepEvent {
+                    person_id: *person_id,
+                    footstep: step,
+                });
             }
         }
 
@@ -308,6 +321,8 @@ impl FootstepTracker {
         }
 
         self.history.prune_older_than(self.footstep_display_duration);
+
+        new_events
     }
 
     /// Get all footsteps grouped by person

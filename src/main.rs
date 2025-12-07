@@ -8,13 +8,53 @@ use opencv::{ highgui, prelude::*, videoio };
 use rayon::prelude::*;
 use pose_detector::{ PoseDetector, PoseDetectorConfig, Keypoints };
 use visualization::{ draw_all_keypoints, draw_all_ankles, draw_footsteps, draw_bounding_boxes };
-use footstep_tracker::FootstepTracker;
+use footstep_tracker::{ FootstepTracker, FootstepEvent };
 use person_detector::{ YoloDetector, YoloDetectorConfig, BoundingBox, PersonTracker };
 use std::sync::{ Arc, Mutex };
+use std::net::{ ToSocketAddrs, UdpSocket };
 
 enum VideoSource {
     Webcam(i32),
     File(String),
+}
+
+struct UdpSender {
+    socket: UdpSocket,
+    target: std::net::SocketAddr,
+}
+
+impl UdpSender {
+    fn new(target: &str) -> Result<Self> {
+        let normalized = if target.contains(':') {
+            target.to_string()
+        } else {
+            format!("{}:5005", target) // default port when omitted
+        };
+
+        let target = normalized
+            .to_socket_addrs()
+            .context("Failed to resolve UDP target address")?
+            .next()
+            .context("UDP target resolved to no addresses")?;
+
+        let socket = UdpSocket::bind("0.0.0.0:0").context("Failed to bind UDP socket")?;
+
+        Ok(Self { socket, target })
+    }
+
+    fn target(&self) -> std::net::SocketAddr {
+        self.target
+    }
+
+    fn send(&self, event: &FootstepEvent) -> Result<()> {
+        let payload = format!("{:.4} {:.4}", event.footstep.x, event.footstep.y);
+
+        self.socket
+            .send_to(payload.as_bytes(), self.target)
+            .context("Failed to send UDP footstep packet")?;
+
+        Ok(())
+    }
 }
 
 fn main() -> Result<()> {
@@ -47,6 +87,19 @@ fn main() -> Result<()> {
     let mut person_detector = YoloDetector::new(yolo_config).context(
         "Failed to initialize YOLO detector"
     )?;
+
+    // Optional UDP sender for footstep events (set FOOTSTEP_UDP_ADDR="host:port")
+    let udp_sender = std::env
+        ::var("FOOTSTEP_UDP_ADDR")
+        .ok()
+        .map(
+            |addr| -> Result<UdpSender> {
+                let sender = UdpSender::new(&addr)?;
+                println!("Footstep UDP target: {}", sender.target());
+                Ok(sender)
+            }
+        )
+        .transpose()?;
 
     // Configure and initialize the pose detector
     let config = PoseDetectorConfig {
@@ -253,7 +306,15 @@ fn main() -> Result<()> {
         }
 
         // Update footstep tracking
-        footstep_tracker.update(&keyed_keypoints);
+        let new_footsteps = footstep_tracker.update(&keyed_keypoints);
+
+        if let Some(sender) = udp_sender.as_ref() {
+            for event in &new_footsteps {
+                if let Err(err) = sender.send(event) {
+                    eprintln!("Failed to send UDP footstep packet: {:?}", err);
+                }
+            }
+        }
 
         // Draw expanded bounding boxes (used for pose detection)
         draw_bounding_boxes(&mut frame, &people_with_ids)?;
