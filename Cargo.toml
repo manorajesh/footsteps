@@ -13,7 +13,7 @@ exclude = [".vscode", "images", ".github", "AlphaPose", "coreml-rs/tests", "rtmp
 
 [dependencies]
 opencv = { version = "0.95", default-features = false, features = ["videoio", "imgcodecs", "imgproc", "highgui"] }
-coreml-rs = { path = "./coreml-rs" }
+coreml-rs = { path = "./coreml-rs", version = "0.5.5" }
 ndarray = "0.16"
 anyhow = "1.0"
 half = "2.3"
