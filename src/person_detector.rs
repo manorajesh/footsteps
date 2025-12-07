@@ -144,6 +144,8 @@ struct Track {
     id: usize,
     bbox: BoundingBox,
     age: usize,
+    velocity: (f32, f32),
+    last_center: (f32, f32),
 }
 
 /// Lightweight tracker to keep person IDs consistent across frames
@@ -315,67 +317,139 @@ impl PersonTracker {
             track.age += 1;
         }
 
-        let mut used_tracks = std::collections::HashSet::new();
+        // Precompute detection properties
+        let dets: Vec<(usize, BoundingBox, (f32, f32), f32)> = detections
+            .into_iter()
+            .enumerate()
+            .map(|(idx, det)| {
+                let center = (det.x, det.y);
+                let diag = (det.width * det.width + det.height * det.height).sqrt();
+                (idx, det, center, diag)
+            })
+            .collect();
 
-        for det in detections.into_iter() {
-            // Find best matching track using IoU, center distance, and corner alignment to handle
-            // drastic box size changes that still share corners.
-            let mut best: Option<(usize, f32, f32, f32)> = None; // (id, iou, dist2, corner_avg)
+        let mut det_assigned: Vec<Option<usize>> = vec![None; dets.len()];
+        let mut track_used = std::collections::HashSet::new();
 
-            for (id, track) in self.tracks.iter() {
-                if used_tracks.contains(id) {
+        // Build candidate pairs with gating and a cost that mixes motion and overlap
+        let mut candidates: Vec<(f32, usize, usize, f32, f32)> = Vec::new();
+        for (track_id, track) in self.tracks.iter() {
+            let pred_center = (
+                track.last_center.0 + track.velocity.0,
+                track.last_center.1 + track.velocity.1,
+            );
+
+            let track_diag = (
+                track.bbox.width * track.bbox.width +
+                track.bbox.height * track.bbox.height
+            ).sqrt();
+
+            for (det_idx, det, det_center, det_diag) in dets.iter() {
+                let dx = det_center.0 - pred_center.0;
+                let dy = det_center.1 - pred_center.1;
+                let center_dist = (dx * dx + dy * dy).sqrt();
+
+                let avg_diag = (det_diag + track_diag) * 0.5;
+                let gate = (avg_diag * 0.9 + 0.03 * (1.0 + (track.age as f32) * 0.2)).max(0.06);
+                let iou = det.iou(&track.bbox);
+
+                if center_dist > gate && iou <= 0.12 {
                     continue;
                 }
 
-                let iou = det.iou(&track.bbox);
-                let dist2 = det.center_distance2(&track.bbox);
-                let corner_avg = det.corner_l2_avg(&track.bbox);
+                // Cost: favor low motion and higher IoU; penalize older tracks slightly
+                let cost = center_dist * 3.0 - iou * 2.0 + (track.age as f32) * 0.03;
+                candidates.push((cost, *track_id, *det_idx, center_dist, iou));
+            }
+        }
 
-                // Accept candidates that have decent overlap, are nearby, or share corner alignment
-                // even if the box scale changed a lot.
-                let nearby = dist2 < 0.02 * 0.02;
-                let aligned_corners = corner_avg < 0.05 * 0.05;
-                let overlaps = iou > 0.15;
+        // Sort by best cost first to mimic a global min-cost matching without full Hungarian
+        candidates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
-                if overlaps || nearby || aligned_corners {
+        for (cost, track_id, det_idx, _dist, _iou) in candidates {
+            if track_used.contains(&track_id) || det_assigned[det_idx].is_some() {
+                continue;
+            }
+            // Very loose upper bound to reject absurd matches
+            if cost > 0.8 {
+                continue;
+            }
+            track_used.insert(track_id);
+            det_assigned[det_idx] = Some(track_id);
+        }
+
+        // Fallback: reuse very recent nearby track if still free, otherwise allocate new ID
+        for (det_idx, _det, det_center, det_diag) in dets.iter() {
+            if det_assigned[*det_idx].is_some() {
+                continue;
+            }
+
+            let mut best: Option<(usize, f32)> = None; // (track_id, dist)
+            for (id, track) in self.tracks.iter() {
+                if track_used.contains(id) || track.age > 3 {
+                    continue;
+                }
+
+                let pred_center = (
+                    track.last_center.0 + track.velocity.0,
+                    track.last_center.1 + track.velocity.1,
+                );
+                let dx = det_center.0 - pred_center.0;
+                let dy = det_center.1 - pred_center.1;
+                let center_dist = (dx * dx + dy * dy).sqrt();
+
+                let track_diag = (
+                    track.bbox.width * track.bbox.width +
+                    track.bbox.height * track.bbox.height
+                ).sqrt();
+                let reuse_gate = ((det_diag + track_diag) * 0.5 * 1.3).max(0.08);
+
+                if center_dist <= reuse_gate {
                     match best {
-                        Some((_, best_iou, best_dist2, best_corner)) => {
-                            let better_iou = iou > best_iou;
-                            let tie_iou_better_corner =
-                                (iou - best_iou).abs() < 1e-6 && corner_avg < best_corner;
-                            let tie_corner_better_dist =
-                                (iou - best_iou).abs() < 1e-6 &&
-                                (corner_avg - best_corner).abs() < 1e-6 &&
-                                dist2 < best_dist2;
-
-                            if better_iou || tie_iou_better_corner || tie_corner_better_dist {
-                                best = Some((*id, iou, dist2, corner_avg));
+                        Some((_, best_dist)) => {
+                            if center_dist < best_dist {
+                                best = Some((*id, center_dist));
                             }
                         }
                         None => {
-                            best = Some((*id, iou, dist2, corner_avg));
+                            best = Some((*id, center_dist));
                         }
                     }
                 }
             }
 
-            let assigned_id = if let Some((id, _, _, _)) = best {
-                used_tracks.insert(id);
-                id
+            if let Some((id, _)) = best {
+                track_used.insert(id);
+                det_assigned[*det_idx] = Some(id);
             } else {
                 let id = self.next_id;
                 self.next_id += 1;
-                id
+                det_assigned[*det_idx] = Some(id);
+            }
+        }
+
+        // Update tracks with assigned detections and emit results in detection order
+        for (det_idx, det, det_center, _det_diag) in dets.into_iter() {
+            let id = det_assigned[det_idx].expect("every detection should have an id");
+
+            let new_velocity = if let Some(prev) = self.tracks.get(&id) {
+                let prev_center = prev.last_center;
+                let vx = (det_center.0 - prev_center.0) * 0.6 + prev.velocity.0 * 0.4;
+                let vy = (det_center.1 - prev_center.1) * 0.6 + prev.velocity.1 * 0.4;
+                (vx, vy)
+            } else {
+                (0.0, 0.0)
             };
 
-            // Update or insert track
-            self.tracks.insert(assigned_id, Track {
-                id: assigned_id,
+            self.tracks.insert(id, Track {
+                id,
                 bbox: det.clone(),
                 age: 0,
+                velocity: new_velocity,
+                last_center: det_center,
             });
 
-            results.push((assigned_id, det));
+            results.push((id, det));
         }
 
         // Drop stale tracks

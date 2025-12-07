@@ -69,7 +69,7 @@ fn main() -> Result<()> {
     );
 
     // Initialize footstep tracker (footsteps visible for 5 seconds)
-    let mut footstep_tracker = FootstepTracker::new(5);
+    let mut footstep_tracker = FootstepTracker::new(100);
 
     // Stable ID tracker for person boxes
     let mut id_tracker = PersonTracker::new(30);
