@@ -1,6 +1,6 @@
 use anyhow::Result;
 use opencv::{ core, imgproc, prelude::* };
-use coreml_rs::{ CoreMLModelOptions, CoreMLModelWithState, ComputePlatform };
+use coreml_rs_fork::{ CoreMLModelOptions, CoreMLModelWithState, ComputePlatform };
 use std::collections::HashMap;
 
 #[cfg(feature = "debug")]
