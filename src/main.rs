@@ -28,7 +28,7 @@ impl UdpSender {
         let normalized = if target.contains(':') {
             target.to_string()
         } else {
-            format!("{}:5005", target) // default port when omitted
+            format!("{}:7000", target) // default port when omitted
         };
 
         let target = normalized
