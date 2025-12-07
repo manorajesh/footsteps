@@ -9,7 +9,7 @@ use clap::Parser;
 use opencv::{ highgui, prelude::*, videoio };
 use rayon::prelude::*;
 use pose_detector::{ PoseDetector, PoseDetectorConfig, Keypoints };
-use visualization::{ draw_all_keypoints, draw_all_ankles, draw_footsteps, draw_bounding_boxes };
+use visualization::{ draw_footsteps, draw_bounding_boxes };
 use footstep_tracker::FootstepTracker;
 use person_detector::{ YoloDetector, YoloDetectorConfig, BoundingBox, PersonTracker };
 use std::sync::{ Arc, Mutex };
@@ -37,7 +37,7 @@ enum VideoSource {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "footstep-tracker", about = "Footstep tracking demo", version, author)]
+#[command(name = "footstep-tracker", about = "Footstep tracking", version, author)]
 struct Args {
     /// Path to the CoreML pose detection model package
     #[arg(short, long, value_name = "MODEL_PATH")]
@@ -50,6 +50,16 @@ struct Args {
         value_parser = parse_video_source
     )]
     video: VideoSource,
+
+    /// UDP target address for footstep events (host:port)
+    #[arg(
+        short,
+        long,
+        value_name = "UDP_TARGET",
+        num_args = 0..=1,
+        default_missing_value = "127.0.0.1:7000"
+    )]
+    udp_target: Option<String>,
 }
 
 fn parse_video_source(input: &str) -> Result<VideoSource, String> {
@@ -77,19 +87,16 @@ fn main() -> Result<()> {
         "Failed to initialize YOLO detector"
     )?;
 
-    // Optional UDP sender for footstep events (set FOOTSTEP_UDP_ADDR="host:port")
-    let udp_sender = std::env
-        ::var("FOOTSTEP_UDP_ADDR")
-        .ok()
-        .map(
-            |addr| -> Result<UdpSender> {
-                let sender = UdpSender::new(&addr)?;
-                #[cfg(feature = "debug")]
-                info!("Footstep UDP target: {}", sender.target());
-                Ok(sender)
-            }
-        )
-        .transpose()?;
+    let udp_sender = if let Some(udp_target) = args.udp_target {
+        let sender = UdpSender::new(&udp_target)?;
+        #[cfg(feature = "debug")]
+        info!("Footstep UDP target: {}", sender.target());
+        Some(sender)
+    } else {
+        #[cfg(feature = "debug")]
+        tracing::warn!("No UDP target specified; footstep events will not be sent over UDP");
+        None
+    };
 
     // Configure and initialize the pose detector
     let config = PoseDetectorConfig {
