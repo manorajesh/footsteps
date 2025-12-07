@@ -7,6 +7,8 @@ use std::time::{ Duration, Instant };
 pub struct Footstep {
     pub x: f32,
     pub y: f32,
+    /// Unit vector from the previous footstep of the same foot, if available
+    pub direction: Option<(f32, f32)>,
     pub timestamp: Instant,
     pub foot: Foot,
 }
@@ -33,17 +35,6 @@ const STILL_SPEED_THRESH: f32 = 0.008; // ankle effectively still
 struct FootstepHistory {
     history_map: HashMap<usize, Vec<Footstep>>,
     current_trails: HashMap<usize, Vec<Footstep>>,
-}
-
-#[derive(Debug, Clone)]
-enum MatchResult {
-    Matched {
-        index: usize,
-        footstep: Footstep,
-    },
-    Inserted {
-        index: usize,
-    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -123,6 +114,7 @@ impl PersonFootstepTracker {
             maybe_step = Some(Footstep {
                 x: pos_abs.1,
                 y: pos_abs.0,
+                direction: None,
                 timestamp: std::time::Instant::now(),
                 foot,
             });
@@ -157,36 +149,49 @@ impl FootstepHistory {
         foot: Foot,
         timestamp: Instant,
         max_dist: f32
-    ) -> MatchResult {
-        let current_step = Footstep { x, y, timestamp, foot };
+    ) -> Footstep {
+        let mut current_step = Footstep { x, y, direction: None, timestamp, foot };
+
+        if
+            let Some(prev_step) = self.history_map.get(&person_id).and_then(|steps|
+                steps
+                    .iter()
+                    .rev()
+                    .find(|s| s.foot == foot)
+            )
+        {
+            let dx = current_step.x - prev_step.x;
+            let dy = current_step.y - prev_step.y;
+            let magnitude = (dx * dx + dy * dy).sqrt();
+            current_step.direction = if magnitude > f32::EPSILON {
+                Some((dx / magnitude, dy / magnitude))
+            } else {
+                Some((0.0, 0.0))
+            };
+        }
+
         let current_trail = self.ensure_current_trail(person_id);
         current_trail.push(current_step.clone());
 
         let footsteps = self.ensure_history(person_id);
 
-        let mut best_idx: Option<usize> = None;
         let mut best_dist = f32::INFINITY;
-
-        for (i, fs) in footsteps.iter().enumerate() {
+        for fs in footsteps.iter() {
             let dx = fs.x - x;
             let dy = fs.y - y;
             let dist = (dx * dx + dy * dy).sqrt();
             if dist < best_dist {
                 best_dist = dist;
-                best_idx = Some(i);
             }
         }
 
-        if let Some(idx) = best_idx {
-            if best_dist <= max_dist {
-                footsteps.push(current_step);
-                return MatchResult::Matched { index: idx, footstep: footsteps[idx].clone() };
-            }
+        if best_dist <= max_dist {
+            footsteps.push(current_step.clone());
+            return current_step;
         }
 
-        let new_index = footsteps.len();
-        footsteps.push(current_step);
-        MatchResult::Inserted { index: new_index }
+        footsteps.push(current_step.clone());
+        current_step
     }
 
     fn prune_older_than(&mut self, max_age: Duration) {
@@ -280,7 +285,7 @@ impl FootstepTracker {
             );
 
             for step in new_steps {
-                self.history.match_or_insert(
+                let step_with_direction = self.history.match_or_insert(
                     *person_id,
                     step.x,
                     step.y,
@@ -291,7 +296,7 @@ impl FootstepTracker {
 
                 new_events.push(FootstepEvent {
                     person_id: *person_id,
-                    footstep: step,
+                    footstep: step_with_direction,
                 });
             }
         }

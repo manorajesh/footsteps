@@ -228,6 +228,32 @@ pub fn draw_footsteps(
                 imgproc::LINE_AA,
                 0
             )?;
+
+            if let Some((dx, dy)) = footstep.direction {
+                let arrow_norm_len = 0.05_f32; // 5% of frame for visibility
+                let end_x = ((footstep.x + dx * arrow_norm_len) * (width as f32)) as i32;
+                let end_y = ((footstep.y + dy * arrow_norm_len) * (height as f32)) as i32;
+
+                imgproc::line(
+                    frame,
+                    core::Point::new(x, y),
+                    core::Point::new(end_x, end_y),
+                    faded_color,
+                    2,
+                    imgproc::LINE_AA,
+                    0
+                )?;
+
+                imgproc::circle(
+                    frame,
+                    core::Point::new(end_x, end_y),
+                    2,
+                    faded_color,
+                    -1,
+                    imgproc::LINE_AA,
+                    0
+                )?;
+            }
         }
     }
 
@@ -243,6 +269,22 @@ pub fn draw_footsteps(
             let y = (footstep.y * (height as f32)) as i32;
 
             imgproc::circle(frame, core::Point::new(x, y), 4, color, -1, imgproc::LINE_AA, 0)?;
+
+            if let Some((dx, dy)) = footstep.direction {
+                let arrow_norm_len = 0.05_f32;
+                let end_x = ((footstep.x + dx * arrow_norm_len) * (width as f32)) as i32;
+                let end_y = ((footstep.y + dy * arrow_norm_len) * (height as f32)) as i32;
+
+                imgproc::line(
+                    frame,
+                    core::Point::new(x, y),
+                    core::Point::new(end_x, end_y),
+                    color,
+                    1,
+                    imgproc::LINE_AA,
+                    0
+                )?;
+            }
         }
     }
 
