@@ -40,7 +40,6 @@ pub struct PoseDetectorConfig {
     pub model_path: String,
     pub model_input_size: usize,
     pub num_keypoints: usize,
-    pub max_people: usize,
     /// Confidence threshold below which we use temporal smoothing more aggressively
     pub low_confidence_threshold: f32,
     /// Smoothing factor for exponential moving average (0.0 = use only current, 1.0 = use only previous)
@@ -55,17 +54,16 @@ impl Default for PoseDetectorConfig {
             model_path: "models/movenet_singlepose_lightning.mlpackage".to_string(),
             model_input_size: 256,
             num_keypoints: 17,
-            max_people: 1,
-            low_confidence_threshold: 0.5,
-            smoothing_alpha: 0.3,
-            low_confidence_alpha: 0.7,
+            low_confidence_threshold: 0.2,
+            smoothing_alpha: 0.8,
+            low_confidence_alpha: 0.9,
         }
     }
 }
 
 /// Pose detector using CoreML with temporal smoothing
 pub struct PoseDetector {
-    config: PoseDetectorConfig,
+    pub config: PoseDetectorConfig,
     model: CoreMLModelWithState,
     /// Previous frame's keypoints for temporal smoothing
     previous_keypoints: Option<MultiPoseKeypoints>,

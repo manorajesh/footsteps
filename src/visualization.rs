@@ -1,5 +1,6 @@
 use crate::pose_detector::{ Keypoint, Keypoints, MultiPoseKeypoints };
 use crate::footstep_tracker::{ Footstep, Foot };
+use crate::person_detector::BoundingBox;
 use anyhow::Result;
 use opencv::{ core, imgproc, prelude::* };
 use std::collections::HashMap;
@@ -32,7 +33,7 @@ pub fn draw_ankle(frame: &mut Mat, keypoints: &Keypoints, confidence_threshold: 
         imgproc::circle(
             frame,
             core::Point::new(x, y),
-            20,
+            5,
             color,
             -1, // Filled
             imgproc::LINE_8,
@@ -49,7 +50,7 @@ pub fn draw_ankle(frame: &mut Mat, keypoints: &Keypoints, confidence_threshold: 
         imgproc::circle(
             frame,
             core::Point::new(x, y),
-            20,
+            5,
             color,
             -1, // Filled
             imgproc::LINE_8,
@@ -226,6 +227,75 @@ pub fn draw_footsteps(
                 0
             )?;
         }
+    }
+
+    Ok(())
+}
+
+/// Draw bounding boxes from person detection
+pub fn draw_bounding_boxes(frame: &mut Mat, bboxes: &[BoundingBox]) -> Result<()> {
+    let height = frame.rows();
+    let width = frame.cols();
+
+    for (idx, bbox) in bboxes.iter().enumerate() {
+        let (x, y, w, h) = bbox.to_pixels(width, height);
+
+        // Choose color based on confidence
+        let color = if bbox.confidence > 0.7 {
+            core::Scalar::new(0.0, 255.0, 0.0, 0.0) // Green for high confidence
+        } else if bbox.confidence > 0.5 {
+            core::Scalar::new(0.0, 255.0, 255.0, 0.0) // Yellow for medium confidence
+        } else {
+            core::Scalar::new(0.0, 165.0, 255.0, 0.0) // Orange for low confidence
+        };
+
+        // Draw rectangle
+        imgproc::rectangle(frame, core::Rect::new(x, y, w, h), color, 2, imgproc::LINE_8, 0)?;
+
+        // Draw label with confidence
+        let label = format!("Person {} ({:.0}%)", idx + 1, bbox.confidence * 100.0);
+        let font_face = imgproc::FONT_HERSHEY_SIMPLEX;
+        let font_scale = 0.6;
+        let thickness = 2;
+
+        // Get text size for background
+        let mut baseline = 0;
+        let text_size = imgproc::get_text_size(
+            &label,
+            font_face,
+            font_scale,
+            thickness,
+            &mut baseline
+        )?;
+
+        // Draw background for text
+        let text_bg_rect = core::Rect::new(
+            x,
+            y - text_size.height - 8,
+            text_size.width + 10,
+            text_size.height + 10
+        );
+        imgproc::rectangle(
+            frame,
+            text_bg_rect,
+            color,
+            -1, // Filled
+            imgproc::LINE_8,
+            0
+        )?;
+
+        // Draw text
+        imgproc::put_text(
+            frame,
+            &label,
+            core::Point::new(x + 5, y - 5),
+            font_face,
+            font_scale,
+            core::Scalar::new(255.0, 255.0, 255.0, 0.0), // White text
+            thickness,
+            imgproc::LINE_8,
+            false
+        )?;
     }
 
     Ok(())

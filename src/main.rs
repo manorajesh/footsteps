@@ -1,12 +1,16 @@
 mod pose_detector;
 mod visualization;
 mod footstep_tracker;
+mod person_detector;
 
 use anyhow::{ Context, Result };
 use opencv::{ highgui, prelude::*, videoio };
-use pose_detector::{ PoseDetector, PoseDetectorConfig };
-use visualization::{ draw_all_keypoints, draw_footsteps };
+use pose_detector::{ PoseDetector, PoseDetectorConfig, Keypoints };
+use visualization::{ draw_all_keypoints, draw_footsteps, draw_bounding_boxes };
 use footstep_tracker::FootstepTracker;
+use person_detector::{ YoloDetector, YoloDetectorConfig, BoundingBox };
+
+use crate::visualization::draw_all_ankles;
 
 enum VideoSource {
     Webcam(i32),
@@ -38,13 +42,21 @@ fn main() -> Result<()> {
         VideoSource::Webcam(0)
     };
 
+    // Configure and initialize the YOLO person detector
+    let yolo_config = YoloDetectorConfig::default();
+    let mut person_detector = YoloDetector::new(yolo_config).context(
+        "Failed to initialize YOLO detector"
+    )?;
+
     // Configure and initialize the pose detector
     let config = PoseDetectorConfig {
         model_path,
         ..Default::default()
     };
 
-    let mut detector = PoseDetector::new(config).context("Failed to initialize pose detector")?;
+    let mut pose_detector = PoseDetector::new(config).context(
+        "Failed to initialize pose detector"
+    )?;
 
     // Initialize footstep tracker (footsteps visible for 5 seconds)
     let mut footstep_tracker = FootstepTracker::new(5);
@@ -123,25 +135,82 @@ fn main() -> Result<()> {
             }
         }
 
-        // Detect pose and get keypoints for all people
+        // Stage 1: Detect people with YOLO
         #[cfg(feature = "debug")]
         let start = std::time::Instant::now();
 
-        let all_keypoints = detector.detect_pose(&frame)?;
+        let people = person_detector.detect_people(&frame)?;
 
         #[cfg(feature = "debug")]
         {
-            if detector.frame_counter % 30 == 0 {
-                let duration = start.elapsed();
-                println!("End-to-End Detection time: {:.2?}", duration);
+            let yolo_time = start.elapsed();
+            if pose_detector.frame_counter % 30 == 0 {
+                println!("YOLO detection time: {:.2?}", yolo_time);
+            }
+        }
+
+        // Stage 2: Run pose detection on each person's bounding box
+        let mut all_keypoints: Vec<Keypoints> = Vec::new();
+        let mut expanded_bboxes: Vec<BoundingBox> = Vec::new();
+
+        for (person_idx, bbox) in people.iter().enumerate() {
+            // Expand bounding box slightly for better coverage
+            let expanded_bbox = bbox.expand(1.4);
+            expanded_bboxes.push(expanded_bbox.clone());
+
+            // Crop the person region
+            let person_crop = YoloDetector::crop_region(
+                &frame,
+                &expanded_bbox,
+                pose_detector.config.model_input_size
+            )?;
+
+            // Detect pose in the cropped region
+            let mut person_keypoints_batch = pose_detector.detect_pose(&person_crop)?;
+
+            // Transform keypoints back to original frame coordinates
+            if let Some(person_keypoints) = person_keypoints_batch.first_mut() {
+                let (x, y, w, h) = expanded_bbox.to_pixels(frame.cols(), frame.rows());
+
+                for kp in person_keypoints.iter_mut() {
+                    // kp[0] is y (normalized), kp[1] is x (normalized)
+                    // Convert from crop coordinates to frame coordinates
+                    kp[1] = (kp[1] * (w as f32) + (x as f32)) / (frame.cols() as f32);
+                    kp[0] = (kp[0] * (h as f32) + (y as f32)) / (frame.rows() as f32);
+                }
+
+                all_keypoints.push(person_keypoints.clone());
+            }
+
+            #[cfg(feature = "debug")]
+            {
+                if pose_detector.frame_counter % 30 == 0 {
+                    println!("Person {}: bbox confidence={:.2}", person_idx, bbox.confidence);
+                }
+            }
+        }
+
+        #[cfg(feature = "debug")]
+        {
+            if pose_detector.frame_counter % 30 == 0 {
+                let total_time = start.elapsed();
+                println!(
+                    "Total detection time (YOLO + {} poses): {:.2?}",
+                    people.len(),
+                    total_time
+                );
             }
         }
 
         // Update footstep tracking
         footstep_tracker.update(&all_keypoints);
 
+        // Draw expanded bounding boxes (used for pose detection)
+        draw_bounding_boxes(&mut frame, &expanded_bboxes)?;
+
         // Visualize all keypoints
-        draw_all_keypoints(&mut frame, &all_keypoints, 0.1)?;
+        // draw_all_keypoints(&mut frame, &all_keypoints, 0.1)?;
+        draw_all_ankles(&mut frame, &all_keypoints, 0.1)?;
 
         // Draw footsteps
         let all_footsteps = footstep_tracker.get_all_footsteps();
