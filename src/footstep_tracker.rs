@@ -2,18 +2,18 @@ use crate::pose_detector::{ Keypoint, Keypoints };
 use std::collections::{ HashMap, HashSet };
 use std::time::{ Duration, Instant };
 
-/// Represents a single footstep with location and timestamp
+/// Footstep
 #[derive(Debug, Clone)]
 pub struct Footstep {
     pub x: f32,
     pub y: f32,
-    /// Unit vector from the previous footstep of the same foot, if available
+    /// Direction
     pub direction: Option<(f32, f32)>,
     pub timestamp: Instant,
     pub foot: Foot,
 }
 
-/// Footstep event paired with person ID for downstream consumers (e.g., UDP output)
+/// Footstep event
 #[derive(Debug, Clone)]
 pub struct FootstepEvent {
     pub person_id: usize,
@@ -28,11 +28,11 @@ pub enum Foot {
 
 const COOLDOWN_FRAMES: usize = 10;
 const MIN_CONFIDENCE: f32 = 0.2;
-const MOVING_SPEED_THRESH: f32 = 0.01; // ankle clearly moving
-const STILL_SPEED_THRESH: f32 = 0.008; // ankle effectively still
+const MOVING_SPEED_THRESH: f32 = 0.01;
+const STILL_SPEED_THRESH: f32 = 0.008;
 const HISTORY_MATCH_DISTANCE: f32 = 0.02;
-const HISTORY_DIRECTION_COS_THRESHOLD: f32 = 0.1; // roughly within ~75 degrees
-const HISTORY_DIRECTION_WEIGHT: f32 = 0.4; // scales direction penalty in match cost
+const HISTORY_DIRECTION_COS_THRESHOLD: f32 = 0.1;
+const HISTORY_DIRECTION_WEIGHT: f32 = 0.4;
 
 #[derive(Debug, Default)]
 struct FootstepHistory {
@@ -47,7 +47,7 @@ struct FootMotionState {
     cooldown: usize,
 }
 
-/// Tracks footsteps for a single person
+/// Person footstep tracker
 #[derive(Debug)]
 struct PersonFootstepTracker {
     left: FootMotionState,
@@ -71,7 +71,7 @@ impl PersonFootstepTracker {
     fn update_motion_hint(&mut self, pelvis: (f32, f32, f32)) -> ((f32, f32), Option<(f32, f32)>) {
         let pelvis_pos = (pelvis.0, pelvis.1);
 
-        // Only update motion when pelvis confidence is reasonable
+        // using pelvis movement as motion direction
         let motion_dir = if pelvis.2 < MIN_CONFIDENCE {
             None
         } else if let Some(prev) = self.last_pelvis {
@@ -123,7 +123,7 @@ impl PersonFootstepTracker {
             motion.cooldown -= 1;
         }
 
-        // Pause state changes if confidence drops
+        // pause state changes if confidence drops
         if ankle.2 < MIN_CONFIDENCE || pelvis.2 < MIN_CONFIDENCE {
             motion.prev_pos = None;
             motion.prev_speed = 0.0;
@@ -260,13 +260,13 @@ impl FootstepHistory {
         self.history_map.clone()
     }
 
-    /// Remove and return history for a specific person (used when they exit).
+    /// Take person history
     fn take_person(&mut self, person_id: usize) -> Option<Vec<Footstep>> {
         self.current_trails.remove(&person_id);
         self.history_map.remove(&person_id)
     }
 
-    /// Return history only for the provided set of active IDs.
+    /// Histories for active IDs
     fn histories_for(&self, active_ids: &HashSet<usize>) -> HashMap<usize, Vec<Footstep>> {
         self.history_map
             .iter()
@@ -277,21 +277,21 @@ impl FootstepHistory {
     }
 }
 
-/// Tracks footsteps for multiple people
+/// Footstep tracker
 pub struct FootstepTracker {
-    /// Map from person index to their tracker
+    /// Person trackers
     person_trackers: HashMap<usize, PersonFootstepTracker>,
-    /// How long to keep footsteps visible (in seconds)
+    /// Display duration
     footstep_display_duration: Duration,
-    /// Persistent history with spatial de-duplication
+    /// History
     history: FootstepHistory,
-    /// Maximum distance (normalized) to consider two steps the same for history merging
+    /// Merge distance
     max_match_distance: f32,
-    /// How long to wait before declaring a person has exited after last seen
+    /// Exit timeout
     exit_timeout: Duration,
-    /// Archived footsteps for people who have exited the frame
+    /// Archived footsteps
     archived_histories: Vec<(usize, Vec<Footstep>)>,
-    /// Mapping from current active IDs to the archived ID they were matched to
+    /// Active to archived
     archived_matches: HashMap<usize, usize>,
 }
 
@@ -377,7 +377,7 @@ impl FootstepTracker {
         }
     }
 
-    /// Update with new frame's keypoints paired with stable IDs
+    /// Update tracker with new keypoints
     pub fn update(&mut self, keyed_keypoints: &[(usize, Keypoints)]) -> Vec<FootstepEvent> {
         let now = Instant::now();
         let mut active_ids: HashSet<usize> = HashSet::new();
@@ -386,7 +386,6 @@ impl FootstepTracker {
         for (person_id, person_keypoints) in keyed_keypoints.iter() {
             active_ids.insert(*person_id);
 
-            // Extract ankle and hip positions
             let left_ankle = person_keypoints[Keypoint::LeftAnkle as usize];
             let right_ankle = person_keypoints[Keypoint::RightAnkle as usize];
             let left_hip = person_keypoints[Keypoint::LeftHip as usize];
@@ -449,9 +448,8 @@ impl FootstepTracker {
             })
             .collect();
 
+        // Archive stale ids
         for id in stale_ids {
-            // If this person was previously matched to an archived track, drop it instead of
-            // drawing again as archived to avoid duplicate ghost trails after exit.
             let was_archived_match = self.archived_matches.remove(&id).is_some();
 
             if let Some(steps) = self.history.take_person(id) {
@@ -471,18 +469,15 @@ impl FootstepTracker {
         new_events
     }
 
-    /// Get all footsteps grouped by person
     pub fn get_all_footsteps(&self) -> HashMap<usize, Vec<Footstep>> {
         let active_ids: HashSet<usize> = self.person_trackers.keys().cloned().collect();
         self.history.histories_for(&active_ids)
     }
 
-    /// Get archived footsteps for people who have exited the frame.
     pub fn get_archived_footsteps(&self) -> &[(usize, Vec<Footstep>)] {
         &self.archived_histories
     }
 
-    /// Reset all tracking data
     pub fn reset(&mut self) {
         self.person_trackers.clear();
         self.history = FootstepHistory::new();

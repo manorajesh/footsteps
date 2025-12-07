@@ -26,7 +26,7 @@ use indicatif::{ ProgressBar, ProgressStyle };
 fn init_tracing() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
-    // Ignore errors if a subscriber was already set by tests or embedding.
+    // ignore errors if already set
     let _ = tracing_subscriber::fmt().with_env_filter(filter).with_ansi(true).try_init();
 }
 
@@ -81,7 +81,6 @@ fn main() -> Result<()> {
     let model_path = args.model_path.unwrap_or_else(|| "models/rtmpose.mlpackage".to_string());
     let video_source = args.video;
 
-    // Configure and initialize the YOLO person detector
     let yolo_config = YoloDetectorConfig::default();
     let mut person_detector = YoloDetector::new(yolo_config).context(
         "Failed to initialize YOLO detector"
@@ -98,7 +97,6 @@ fn main() -> Result<()> {
         None
     };
 
-    // Configure and initialize the pose detector
     let config = PoseDetectorConfig {
         model_path,
         ..Default::default()
@@ -142,13 +140,10 @@ fn main() -> Result<()> {
         )
     );
 
-    // Initialize footstep tracker (footsteps visible for 5 seconds)
     let mut footstep_tracker = FootstepTracker::new(1000);
 
-    // Stable ID tracker for person boxes
     let mut id_tracker = PersonTracker::new(1000);
 
-    // Open video source and get FPS for video files
     let (mut cap, video_fps) = match &video_source {
         VideoSource::Webcam(camera_id) => {
             #[cfg(feature = "debug")]
@@ -195,15 +190,14 @@ fn main() -> Result<()> {
 
     let is_video_file = matches!(video_source, VideoSource::File(_));
 
-    // Calculate delay for video playback (in milliseconds)
     let frame_delay = if let Some(fps) = video_fps {
         if fps > 0.0 {
             (1000.0 / fps) as i32
         } else {
-            30 // fallback to ~30 FPS
+            30 // fallback to 30 FPS
         }
     } else {
-        1 // For webcam, minimal delay
+        1 // minimal delay for webcam
     };
 
     #[cfg(feature = "debug")]
@@ -219,14 +213,14 @@ fn main() -> Result<()> {
         cap.read(&mut frame)?;
 
         if frame.empty() {
-            // If it's a video file, loop back to the beginning
+            // loop video back to start
             if is_video_file {
                 #[cfg(feature = "debug")]
                 debug!("Looping video...");
                 cap.set(videoio::CAP_PROP_POS_FRAMES, 0.0)?;
                 cap.read(&mut frame)?;
 
-                // If still empty after reset, break
+                // if still no frame then stop
                 if frame.empty() {
                     break;
                 }
@@ -235,7 +229,6 @@ fn main() -> Result<()> {
             }
         }
 
-        // Stage 1: Detect people with YOLO
         #[cfg(feature = "debug")]
         let start = std::time::Instant::now();
 
@@ -250,7 +243,6 @@ fn main() -> Result<()> {
             }
         }
 
-        // Stage 2: Run pose detection on each person's bounding box
         let pose_config = config.clone();
         let detector_pool = detector_pool.clone();
 
@@ -337,7 +329,6 @@ fn main() -> Result<()> {
             }
         }
 
-        // Update footstep tracking
         let new_footsteps = footstep_tracker.update(&keyed_keypoints);
 
         if let Some(sender) = udp_sender.as_ref() {
@@ -354,28 +345,20 @@ fn main() -> Result<()> {
             }
         }
 
-        // Draw expanded bounding boxes (used for pose detection)
         draw_bounding_boxes(&mut frame, &people_with_ids)?;
-
-        // Visualize all keypoints
-        // draw_all_keypoints(&mut frame, &all_keypoints, 0.1)?;
-        // draw_all_ankles(&mut frame, &all_keypoints, 0.1)?;
-
-        // Draw footsteps
         let active_footsteps = footstep_tracker.get_all_footsteps();
         let archived = footstep_tracker.get_archived_footsteps();
 
         draw_footsteps(&mut frame, &active_footsteps)?;
 
-        // Only show archived traces when we have active people, to avoid ghosts after everyone leaves
+        // show old footsteps only if people are still there to avoid ghosts
         if !active_footsteps.is_empty() {
             draw_archived_footsteps(&mut frame, archived)?;
         }
 
         highgui::imshow(window_name, &frame)?;
 
-        // Break on 'q' key - use appropriate delay for video playback
-        if highgui::wait_key(1)? == (b'q' as i32) {
+        if highgui::wait_key(frame_delay)? == (b'q' as i32) {
             break;
         }
 

@@ -19,12 +19,11 @@ fn confidence_to_color(confidence: f32) -> core::Scalar {
     }
 }
 
-/// Draw ankle keypoints for a single person
+/// Draw ankle
 pub fn draw_ankle(frame: &mut Mat, keypoints: &Keypoints, confidence_threshold: f32) -> Result<()> {
     let height = frame.rows();
     let width = frame.cols();
 
-    // Draw left ankle
     if keypoints[Keypoint::LeftAnkle as usize][2] > confidence_threshold {
         let x = (keypoints[Keypoint::LeftAnkle as usize][1] * (width as f32)) as i32;
         let y = (keypoints[Keypoint::LeftAnkle as usize][0] * (height as f32)) as i32;
@@ -41,7 +40,6 @@ pub fn draw_ankle(frame: &mut Mat, keypoints: &Keypoints, confidence_threshold: 
         )?;
     }
 
-    // Draw right ankle
     if keypoints[Keypoint::RightAnkle as usize][2] > confidence_threshold {
         let x = (keypoints[Keypoint::RightAnkle as usize][1] * (width as f32)) as i32;
         let y = (keypoints[Keypoint::RightAnkle as usize][0] * (height as f32)) as i32;
@@ -61,7 +59,7 @@ pub fn draw_ankle(frame: &mut Mat, keypoints: &Keypoints, confidence_threshold: 
     Ok(())
 }
 
-/// Draw ankles for all detected people
+/// Draw all ankles
 pub fn draw_all_ankles(
     frame: &mut Mat,
     all_keypoints: &MultiPoseKeypoints,
@@ -73,7 +71,7 @@ pub fn draw_all_ankles(
     Ok(())
 }
 
-/// Draw all keypoints and skeleton connections for all detected people
+/// Draw all keypoints
 pub fn draw_all_keypoints(
     frame: &mut Mat,
     all_keypoints: &MultiPoseKeypoints,
@@ -82,7 +80,7 @@ pub fn draw_all_keypoints(
     let height = frame.rows();
     let width = frame.cols();
 
-    // Define skeleton connections
+    // skeleton connections
     let connections: Vec<(Keypoint, Keypoint)> = vec![
         (Keypoint::Nose, Keypoint::LeftEye),
         (Keypoint::Nose, Keypoint::RightEye),
@@ -105,7 +103,6 @@ pub fn draw_all_keypoints(
     ];
 
     for keypoints in all_keypoints {
-        // Draw all keypoints with confidence-based colors
         for kp in keypoints {
             if kp[2] > confidence_threshold {
                 let x = (kp[1] * (width as f32)) as i32;
@@ -124,7 +121,6 @@ pub fn draw_all_keypoints(
             }
         }
 
-        // Draw skeleton connections
         for (start, end) in &connections {
             let start_idx = *start as usize;
             let end_idx = *end as usize;
@@ -154,9 +150,9 @@ pub fn draw_all_keypoints(
     Ok(())
 }
 
-/// Get a unique color for each person based on their index
-fn person_color(person_idx: usize) -> core::Scalar {
-    // Define a set of distinct colors (BGR format)
+/// Person color
+fn get_person_color(person_idx: usize) -> core::Scalar {
+    // BGR format
     let colors = vec![
         core::Scalar::new(0.0, 255.0, 0.0, 0.0), // Green
         core::Scalar::new(255.0, 0.0, 0.0, 0.0), // Blue
@@ -171,7 +167,7 @@ fn person_color(person_idx: usize) -> core::Scalar {
     colors[person_idx % colors.len()]
 }
 
-/// Draw footsteps for all people with different colors per person
+/// Draw footsteps
 pub fn draw_footsteps(
     frame: &mut Mat,
     active_footsteps: &HashMap<usize, Vec<Footstep>>
@@ -179,28 +175,23 @@ pub fn draw_footsteps(
     let height = frame.rows();
     let width = frame.cols();
 
-    // Draw active footsteps with age-based fade
     for (person_idx, footsteps) in active_footsteps {
-        let color = person_color(*person_idx);
+        let color = get_person_color(*person_idx);
 
         for footstep in footsteps {
-            // Convert normalized coordinates to pixel coordinates
             let x = (footstep.x * (width as f32)) as i32;
             let y = (footstep.y * (height as f32)) as i32;
 
-            // Calculate opacity based on age (fade out old footsteps)
             let age = std::time::Instant::now().duration_since(footstep.timestamp);
             let age_secs = age.as_secs_f32();
             let max_age = 5.0; // Should match footstep_display_duration
             let opacity = 1.0 - (age_secs / max_age).min(1.0);
 
-            // Adjust color alpha based on opacity
             let mut faded_color = color.clone();
             faded_color[0] *= opacity as f64;
             faded_color[1] *= opacity as f64;
             faded_color[2] *= opacity as f64;
 
-            // Draw filled circle for footstep
             let radius = 5;
             imgproc::circle(
                 frame,
@@ -212,7 +203,6 @@ pub fn draw_footsteps(
                 0
             )?;
 
-            // Draw a smaller circle in a different color to indicate left vs right foot
             let foot_indicator_color = match footstep.foot {
                 Foot::Left => core::Scalar::new(255.0, 255.0, 255.0, 0.0), // White
                 Foot::Right => core::Scalar::new(0.0, 0.0, 0.0, 0.0), // Black
@@ -259,7 +249,7 @@ pub fn draw_footsteps(
     Ok(())
 }
 
-/// Draw archived footsteps (e.g., matched histories) as faint traces
+/// Draw archived footsteps
 pub fn draw_archived_footsteps(
     frame: &mut Mat,
     archived_footsteps: &[(usize, Vec<Footstep>)]
@@ -268,8 +258,7 @@ pub fn draw_archived_footsteps(
     let width = frame.cols();
 
     for (person_idx, footsteps) in archived_footsteps {
-        let mut color = person_color(*person_idx);
-        // Fade archived footsteps to distinguish from active
+        let mut color = get_person_color(*person_idx);
         color[0] *= 0.25;
         color[1] *= 0.25;
         color[2] *= 0.25;
@@ -309,7 +298,6 @@ pub fn draw_bounding_boxes(frame: &mut Mat, bboxes: &[(usize, BoundingBox)]) -> 
     for (idx, (id, bbox)) in bboxes.iter().enumerate() {
         let (x, y, w, h) = bbox.to_pixels(width, height);
 
-        // Choose color based on confidence
         let color = if bbox.confidence > 0.7 {
             core::Scalar::new(0.0, 255.0, 0.0, 0.0) // Green for high confidence
         } else if bbox.confidence > 0.5 {
@@ -318,16 +306,13 @@ pub fn draw_bounding_boxes(frame: &mut Mat, bboxes: &[(usize, BoundingBox)]) -> 
             core::Scalar::new(0.0, 165.0, 255.0, 0.0) // Orange for low confidence
         };
 
-        // Draw rectangle
         imgproc::rectangle(frame, core::Rect::new(x, y, w, h), color, 2, imgproc::LINE_8, 0)?;
 
-        // Draw label with confidence
         let label = format!("ID {} ({:.0}%)", id, bbox.confidence * 100.0);
         let font_face = imgproc::FONT_HERSHEY_SIMPLEX;
         let font_scale = 0.6;
         let thickness = 2;
 
-        // Get text size for background
         let mut baseline = 0;
         let text_size = imgproc::get_text_size(
             &label,
@@ -337,7 +322,6 @@ pub fn draw_bounding_boxes(frame: &mut Mat, bboxes: &[(usize, BoundingBox)]) -> 
             &mut baseline
         )?;
 
-        // Draw background for text
         let text_bg_rect = core::Rect::new(
             x,
             y - text_size.height - 8,
@@ -353,7 +337,6 @@ pub fn draw_bounding_boxes(frame: &mut Mat, bboxes: &[(usize, BoundingBox)]) -> 
             0
         )?;
 
-        // Draw text
         imgproc::put_text(
             frame,
             &label,
