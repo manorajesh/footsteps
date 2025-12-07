@@ -1,4 +1,5 @@
-models/
+models/*
+!models/*.mlpackage
 build/
 *.o
 *.a
