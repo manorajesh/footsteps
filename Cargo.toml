@@ -8,7 +8,8 @@ repository = "https://github.com/manorajesh/footsteps"
 license = "MIT"
 keywords = ["real-time", "pose-estimation", "coreml", "body-tracking"]
 categories = ["utilities", "computer-vision", "machine-learning"]
-exclude = [".vscode", "images", ".github", "AlphaPose", "coreml-rs/tests", "rtmpose_docker", "*.py", "venv"]
+exclude = [".vscode", "images", ".github", "AlphaPose", "coreml-rs/tests", "rtmpose_docker", "*.py", "venv", "models"]
+include = ["models/rtmpose.mlpackage", "models/yolo11n.mlpackage"]
 
 
 [dependencies]
