@@ -3,6 +3,8 @@ use std::collections::HashMap;
 
 const COOLDOWN_FRAMES: usize = 10;
 const MIN_CONFIDENCE: f32 = 0.2;
+const MOVING_SPEED_THRESH: f32 = 0.01; // ankle clearly moving
+const STILL_SPEED_THRESH: f32 = 0.008; // ankle effectively still
 
 /// Represents a single footstep with location and timestamp
 #[derive(Debug, Clone)]
@@ -19,97 +21,88 @@ pub enum Foot {
     Right,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct FootMotionState {
+    prev_pos: Option<(f32, f32)>,
+    prev_speed: f32,
+    cooldown: usize,
+}
+
 /// Tracks footsteps for a single person
 #[derive(Debug)]
 struct PersonFootstepTracker {
-    /// Previous ankle positions [left_y, left_x, right_y, right_x]
-    prev_left_ankle: Option<(f32, f32, f32)>, // (y, x, confidence)
-    prev_right_ankle: Option<(f32, f32, f32)>,
-    /// Detected footsteps for this person
     footsteps: Vec<Footstep>,
-    /// Vertical velocity for each ankle (to detect downward motion stopping)
-    left_velocity: f32,
-    right_velocity: f32,
-    /// Flags to track if we've recently detected a step (prevent duplicates)
-    left_cooldown: usize,
-    right_cooldown: usize,
+    left: FootMotionState,
+    right: FootMotionState,
 }
 
 impl PersonFootstepTracker {
     fn new() -> Self {
         Self {
-            prev_left_ankle: None,
-            prev_right_ankle: None,
             footsteps: Vec::new(),
-            left_velocity: 0.0,
-            right_velocity: 0.0,
-            left_cooldown: 0,
-            right_cooldown: 0,
+            left: FootMotionState { prev_pos: None, prev_speed: 0.0, cooldown: 0 },
+            right: FootMotionState { prev_pos: None, prev_speed: 0.0, cooldown: 0 },
         }
     }
 
-    /// Update tracking with new ankle positions and detect footsteps
-    fn update(&mut self, left_ankle: (f32, f32, f32), right_ankle: (f32, f32, f32)) {
-        // Decay cooldowns
-        if self.left_cooldown > 0 {
-            self.left_cooldown -= 1;
-        }
-        if self.right_cooldown > 0 {
-            self.right_cooldown -= 1;
-        }
-
-        // Track left ankle
-        if left_ankle.2 > MIN_CONFIDENCE {
-            if let Some(prev) = self.prev_left_ankle {
-                // Calculate vertical velocity (positive = moving down)
-                let new_velocity = left_ankle.0 - prev.0;
-
-                // Detect footstep: was moving down (velocity > 0), now stopped/slowed (velocity ~= 0)
-                // and ankle is in lower part of frame (y > 0.5)
-                if
-                    self.left_velocity > 0.005 &&
-                    new_velocity.abs() < 0.003 &&
-                    left_ankle.0 > 0.5 &&
-                    self.left_cooldown == 0
-                {
-                    self.footsteps.push(Footstep {
-                        x: left_ankle.1,
-                        y: left_ankle.0,
-                        timestamp: std::time::Instant::now(),
-                        foot: Foot::Left,
-                    });
-                    self.left_cooldown = COOLDOWN_FRAMES; // Prevent duplicate detection for ~10 frames
-                }
-
-                self.left_velocity = new_velocity;
-            }
-            self.prev_left_ankle = Some(left_ankle);
+    fn update(
+        &mut self,
+        left_ankle: (f32, f32, f32),
+        right_ankle: (f32, f32, f32),
+        pelvis: (f32, f32, f32)
+    ) {
+        if let Some(step) = Self::process_foot(Foot::Left, &mut self.left, left_ankle, pelvis) {
+            self.footsteps.push(step);
         }
 
-        // Track right ankle
-        if right_ankle.2 > MIN_CONFIDENCE {
-            if let Some(prev) = self.prev_right_ankle {
-                let new_velocity = right_ankle.0 - prev.0;
-
-                if
-                    self.right_velocity > 0.005 &&
-                    new_velocity.abs() < 0.003 &&
-                    right_ankle.0 > 0.5 &&
-                    self.right_cooldown == 0
-                {
-                    self.footsteps.push(Footstep {
-                        x: right_ankle.1,
-                        y: right_ankle.0,
-                        timestamp: std::time::Instant::now(),
-                        foot: Foot::Right,
-                    });
-                    self.right_cooldown = COOLDOWN_FRAMES;
-                }
-
-                self.right_velocity = new_velocity;
-            }
-            self.prev_right_ankle = Some(right_ankle);
+        if let Some(step) = Self::process_foot(Foot::Right, &mut self.right, right_ankle, pelvis) {
+            self.footsteps.push(step);
         }
+    }
+
+    fn process_foot(
+        foot: Foot,
+        motion: &mut FootMotionState,
+        ankle: (f32, f32, f32),
+        pelvis: (f32, f32, f32)
+    ) -> Option<Footstep> {
+        if motion.cooldown > 0 {
+            motion.cooldown -= 1;
+        }
+
+        // Pause state changes if confidence drops
+        if ankle.2 < MIN_CONFIDENCE || pelvis.2 < MIN_CONFIDENCE {
+            motion.prev_pos = None;
+            motion.prev_speed = 0.0;
+            return None;
+        }
+        let pos_abs = (ankle.0, ankle.1);
+        let speed = if let Some(prev) = motion.prev_pos {
+            let dy = pos_abs.0 - prev.0;
+            let dx = pos_abs.1 - prev.1;
+            (dy * dy + dx * dx).sqrt()
+        } else {
+            0.0
+        };
+
+        let was_moving = motion.prev_speed > MOVING_SPEED_THRESH;
+        let now_still = speed < STILL_SPEED_THRESH;
+
+        let mut maybe_step = None;
+        if was_moving && now_still && motion.cooldown == 0 {
+            maybe_step = Some(Footstep {
+                x: pos_abs.1,
+                y: pos_abs.0,
+                timestamp: std::time::Instant::now(),
+                foot,
+            });
+            motion.cooldown = COOLDOWN_FRAMES;
+        }
+
+        motion.prev_pos = Some(pos_abs);
+        motion.prev_speed = speed;
+
+        maybe_step
     }
 
     /// Get all footsteps for this person
@@ -153,14 +146,23 @@ impl FootstepTracker {
                 .entry(person_idx)
                 .or_insert_with(PersonFootstepTracker::new);
 
-            // Extract ankle positions
+            // Extract ankle and hip positions
             let left_ankle = person_keypoints[Keypoint::LeftAnkle as usize];
             let right_ankle = person_keypoints[Keypoint::RightAnkle as usize];
+            let left_hip = person_keypoints[Keypoint::LeftHip as usize];
+            let right_hip = person_keypoints[Keypoint::RightHip as usize];
+
+            let pelvis = (
+                (left_hip[0] + right_hip[0]) * 0.5,
+                (left_hip[1] + right_hip[1]) * 0.5,
+                (left_hip[2] + right_hip[2]) * 0.5,
+            );
 
             // Update tracker
             tracker.update(
                 (left_ankle[0], left_ankle[1], left_ankle[2]),
-                (right_ankle[0], right_ankle[1], right_ankle[2])
+                (right_ankle[0], right_ankle[1], right_ankle[2]),
+                pelvis
             );
 
             // Cleanup old footsteps
