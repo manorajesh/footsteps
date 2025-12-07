@@ -2,6 +2,8 @@ mod pose_detector;
 mod visualization;
 mod footstep_tracker;
 mod person_detector;
+mod access;
+mod get_direction;
 
 use anyhow::{ Context, Result };
 use opencv::{ highgui, prelude::*, videoio };
