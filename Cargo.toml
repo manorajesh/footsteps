@@ -10,12 +10,15 @@ ndarray = "0.16"
 anyhow = "1.0"
 half = "2.3"
 rayon = "1.11.0"
+tracing = { version = "0.1.43", default-features = false, features = ["std"], optional = true }
+tracing-subscriber = { version = "0.3.22", default-features = false, optional = true, features = ["fmt", "env-filter", "std", "ansi"] }
+indicatif = { version = "0.18.3", optional = true }
 
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
 
-# Optional feature for debug logging
+
 [features]
-debug = []
+debug = ["tracing", "tracing-subscriber", "indicatif"]

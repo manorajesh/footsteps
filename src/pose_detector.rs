@@ -4,6 +4,9 @@ use coreml_rs::{ CoreMLModelOptions, CoreMLModelWithState, ComputePlatform };
 use ndarray::Array4;
 use half;
 
+#[cfg(feature = "debug")]
+use tracing::{ debug, info };
+
 /// Keypoint indices for the 17-point COCO skeleton
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
@@ -88,7 +91,7 @@ impl PoseDetector {
     /// Create a new pose detector with the given configuration
     pub fn new(config: PoseDetectorConfig) -> Result<Self> {
         #[cfg(feature = "debug")]
-        println!("Initializing Pose Detector with CoreML...");
+        debug!("Initializing Pose Detector with CoreML...");
 
         let mut model_options = CoreMLModelOptions::default();
         model_options.compute_platform = ComputePlatform::CpuAndANE;
@@ -99,13 +102,13 @@ impl PoseDetector {
 
         #[cfg(feature = "debug")]
         {
-            println!("✓ CoreML model loaded with Neural Engine acceleration!");
-            println!("Model: {}", config.model_path);
-            println!("Input size: {}x{} (WxH)", config.input_width, config.input_height);
+            debug!("✓ CoreML model loaded with Neural Engine acceleration!");
+            debug!("Model: {}", config.model_path);
+            debug!("Input size: {}x{} (WxH)", config.input_width, config.input_height);
         }
 
         #[cfg(feature = "debug")]
-        println!("✓ Pose Detector ready with temporal smoothing!");
+        debug!("✓ Pose Detector ready with temporal smoothing!");
 
         Ok(Self {
             config,
@@ -184,11 +187,11 @@ impl PoseDetector {
         {
             self.frame_counter += 1;
             if self.frame_counter == 1 {
-                println!("Available outputs: {:?}", outputs.outputs.keys().collect::<Vec<_>>());
+                debug!("Available outputs: {:?}", outputs.outputs.keys().collect::<Vec<_>>());
             }
             if self.frame_counter % 30 == 0 {
                 let elapsed = start.elapsed();
-                println!("RTMPose inference time: {:.2}ms", elapsed.as_secs_f32() * 1000.0);
+                debug!("RTMPose inference time: {:.2}ms", elapsed.as_secs_f32() * 1000.0);
             }
         }
 
@@ -224,8 +227,8 @@ impl PoseDetector {
         #[cfg(feature = "debug")]
         {
             if self.frame_counter == 1 {
-                println!("X logits len: {}, expected: {}", x_logits.len(), k * wx);
-                println!("Y logits len: {}, expected: {}", y_logits.len(), k * wy);
+                debug!("X logits len: {}, expected: {}", x_logits.len(), k * wx);
+                debug!("Y logits len: {}, expected: {}", y_logits.len(), k * wy);
             }
         }
 
@@ -432,6 +435,6 @@ impl PoseDetector {
     pub fn reset_smoothing(&mut self) {
         self.previous_keypoints = None;
         #[cfg(feature = "debug")]
-        println!("Temporal smoothing reset");
+        debug!("Temporal smoothing reset");
     }
 }

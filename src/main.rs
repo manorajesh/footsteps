@@ -13,6 +13,21 @@ use person_detector::{ YoloDetector, YoloDetectorConfig, BoundingBox, PersonTrac
 use std::sync::{ Arc, Mutex };
 use std::net::{ ToSocketAddrs, UdpSocket };
 
+#[cfg(feature = "debug")]
+use tracing::{ debug, error, info };
+#[cfg(feature = "debug")]
+use tracing_subscriber::EnvFilter;
+#[cfg(feature = "debug")]
+use indicatif::{ ProgressBar, ProgressStyle };
+
+#[cfg(feature = "debug")]
+fn init_tracing() {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+
+    // Ignore errors if a subscriber was already set by tests or embedding.
+    let _ = tracing_subscriber::fmt().with_env_filter(filter).with_ansi(true).try_init();
+}
+
 enum VideoSource {
     Webcam(i32),
     File(String),
@@ -39,6 +54,12 @@ impl UdpSender {
 
         let socket = UdpSocket::bind("0.0.0.0:0").context("Failed to bind UDP socket")?;
 
+        #[cfg(feature = "debug")]
+        info!(
+            "UDP socket bound to {}",
+            socket.local_addr().unwrap_or_else(|_| "unknown".parse().unwrap())
+        );
+
         Ok(Self { socket, target })
     }
 
@@ -47,8 +68,10 @@ impl UdpSender {
     }
 
     fn send(&self, event: &FootstepEvent) -> Result<()> {
-        let payload = format!("{:.4} {:.4}", event.footstep.x, event.footstep.y);
+        let payload = format!("{:.4} {:.4}\n", event.footstep.x, event.footstep.y);
 
+        #[cfg(feature = "debug")]
+        debug!("Sending UDP footstep packet: {:?}", payload);
         self.socket
             .send_to(payload.as_bytes(), self.target)
             .context("Failed to send UDP footstep packet")?;
@@ -58,6 +81,9 @@ impl UdpSender {
 }
 
 fn main() -> Result<()> {
+    #[cfg(feature = "debug")]
+    init_tracing();
+
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
 
@@ -95,7 +121,8 @@ fn main() -> Result<()> {
         .map(
             |addr| -> Result<UdpSender> {
                 let sender = UdpSender::new(&addr)?;
-                println!("Footstep UDP target: {}", sender.target());
+                #[cfg(feature = "debug")]
+                info!("Footstep UDP target: {}", sender.target());
                 Ok(sender)
             }
         )
@@ -112,53 +139,86 @@ fn main() -> Result<()> {
         .map(|n| n.get())
         .unwrap_or(4);
 
+    #[cfg(feature = "debug")]
+    info!("Configuring {} pose detector workers", worker_count);
+
+    #[cfg(feature = "debug")]
+    let pb = ProgressBar::new(worker_count as u64).with_style(
+        ProgressStyle::default_bar()
+            .template("{prefix:.bold.blue} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+            .unwrap()
+            .progress_chars("=>-")
+    );
+
+    #[cfg(feature = "debug")]
+    pb.set_prefix("Pose workers");
+
     let detector_pool: Arc<Mutex<Vec<PoseDetector>>> = Arc::new(
         Mutex::new(
             (0..worker_count)
-                .map(|_| PoseDetector::new(config.clone()))
+                .map(|idx| {
+                    let res = PoseDetector::new(config.clone());
+                    #[cfg(feature = "debug")]
+                    {
+                        pb.inc(1);
+                        if idx + 1 == worker_count {
+                            pb.finish_with_message("ready");
+                        }
+                    }
+                    res
+                })
                 .collect::<Result<Vec<_>>>()
                 .context("Failed to initialize pose detector pool")?
         )
     );
 
     // Initialize footstep tracker (footsteps visible for 5 seconds)
-    let mut footstep_tracker = FootstepTracker::new(100);
+    let mut footstep_tracker = FootstepTracker::new(1000);
 
     // Stable ID tracker for person boxes
-    let mut id_tracker = PersonTracker::new(30);
+    let mut id_tracker = PersonTracker::new(1000);
 
     // Open video source and get FPS for video files
     let (mut cap, video_fps) = match &video_source {
         VideoSource::Webcam(camera_id) => {
-            println!("Opening camera {}...", camera_id);
+            #[cfg(feature = "debug")]
+            info!("Opening camera {}...", camera_id);
             let cap = videoio::VideoCapture
                 ::new(*camera_id, videoio::CAP_AVFOUNDATION)
                 .context("Failed to open video capture")?;
 
             if !videoio::VideoCapture::is_opened(&cap)? {
-                eprintln!("Error: Could not open camera {}", camera_id);
-                eprintln!(
-                    "Try a different camera ID with: cargo run --release -- <model_path> <camera_id>"
-                );
+                #[cfg(feature = "debug")]
+                {
+                    error!("Error: Could not open camera {}", camera_id);
+                    error!(
+                        "Try a different camera ID with: cargo run --release -- <model_path> <camera_id>"
+                    );
+                }
                 return Ok(());
             }
             (cap, None)
         }
         VideoSource::File(path) => {
-            println!("Opening video file: {}", path);
+            #[cfg(feature = "debug")]
+            info!("Opening video file: {}", path);
             let cap = videoio::VideoCapture
                 ::from_file(path, videoio::CAP_ANY)
                 .context("Failed to open video file")?;
 
             if !videoio::VideoCapture::is_opened(&cap)? {
-                eprintln!("Error: Could not open video file: {}", path);
-                eprintln!("Make sure the file exists and is a valid video format");
+                #[cfg(feature = "debug")]
+                {
+                    error!("Error: Could not open video file: {}", path);
+                    error!("Make sure the file exists and is a valid video format");
+                }
                 return Ok(());
             }
 
             let fps = cap.get(videoio::CAP_PROP_FPS)?;
             let frame_count = cap.get(videoio::CAP_PROP_FRAME_COUNT)?;
-            println!("Video: {:.1} FPS, {} frames", fps, frame_count as i32);
+            #[cfg(feature = "debug")]
+            info!("Video: {:.1} FPS, {} frames", fps, frame_count as i32);
             (cap, Some(fps))
         }
     };
@@ -176,7 +236,8 @@ fn main() -> Result<()> {
         1 // For webcam, minimal delay
     };
 
-    println!("Press 'q' to quit");
+    #[cfg(feature = "debug")]
+    info!("Press 'q' to quit");
 
     let window_name = "Footstep Tracker - CoreML";
     highgui::named_window(window_name, highgui::WINDOW_AUTOSIZE)?;
@@ -190,7 +251,8 @@ fn main() -> Result<()> {
         if frame.empty() {
             // If it's a video file, loop back to the beginning
             if is_video_file {
-                println!("Looping video...");
+                #[cfg(feature = "debug")]
+                debug!("Looping video...");
                 cap.set(videoio::CAP_PROP_POS_FRAMES, 0.0)?;
                 cap.read(&mut frame)?;
 
@@ -214,7 +276,7 @@ fn main() -> Result<()> {
         {
             let yolo_time = start.elapsed();
             if frame_index % 30 == 0 {
-                println!("YOLO detection time: {:.2?}", yolo_time);
+                debug!("YOLO detection time: {:.2?}", yolo_time);
             }
         }
 
@@ -264,7 +326,7 @@ fn main() -> Result<()> {
                         #[cfg(feature = "debug")]
                         {
                             if frame_index % 30 == 0 {
-                                println!(
+                                debug!(
                                     "Person {}: bbox confidence={:.2}",
                                     person_idx,
                                     bbox.confidence
@@ -297,7 +359,7 @@ fn main() -> Result<()> {
         {
             if frame_index % 30 == 0 {
                 let total_time = start.elapsed();
-                println!(
+                debug!(
                     "Total detection time (YOLO + {} poses): {:.2?}",
                     people_with_ids.len(),
                     total_time
@@ -310,8 +372,14 @@ fn main() -> Result<()> {
 
         if let Some(sender) = udp_sender.as_ref() {
             for event in &new_footsteps {
+                #[cfg(feature = "debug")]
                 if let Err(err) = sender.send(event) {
-                    eprintln!("Failed to send UDP footstep packet: {:?}", err);
+                    error!("Failed to send UDP footstep packet: {:?}", err);
+                }
+
+                #[cfg(not(feature = "debug"))]
+                {
+                    let _ = sender.send(event);
                 }
             }
         }

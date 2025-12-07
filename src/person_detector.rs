@@ -3,6 +3,9 @@ use opencv::{ core, imgproc, prelude::* };
 use coreml_rs::{ CoreMLModelOptions, CoreMLModelWithState, ComputePlatform };
 use std::collections::HashMap;
 
+#[cfg(feature = "debug")]
+use tracing::info;
+
 /// COCO class ID for person
 const PERSON_CLASS_ID: usize = 0;
 
@@ -159,7 +162,7 @@ impl YoloDetector {
     /// Create a new YOLO detector
     pub fn new(config: YoloDetectorConfig) -> Result<Self> {
         #[cfg(feature = "debug")]
-        println!("Initializing YOLO Detector...");
+        info!("Initializing YOLO Detector...");
 
         let mut model_options = CoreMLModelOptions::default();
         model_options.compute_platform = ComputePlatform::CpuAndANE;
@@ -170,9 +173,9 @@ impl YoloDetector {
 
         #[cfg(feature = "debug")]
         {
-            println!("✓ YOLO model loaded with Neural Engine acceleration!");
-            println!("Model: {}", config.model_path);
-            println!("Input size: {}x{}", config.input_size, config.input_size);
+            info!("✓ YOLO model loaded with Neural Engine acceleration!");
+            info!("Model: {}", config.model_path);
+            info!("Input size: {}x{}", config.input_size, config.input_size);
         }
 
         Ok(Self { config, model })
