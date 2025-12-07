@@ -5,10 +5,12 @@ mod person_detector;
 
 use anyhow::{ Context, Result };
 use opencv::{ highgui, prelude::*, videoio };
+use rayon::prelude::*;
 use pose_detector::{ PoseDetector, PoseDetectorConfig, Keypoints };
 use visualization::{ draw_all_keypoints, draw_all_ankles, draw_footsteps, draw_bounding_boxes };
 use footstep_tracker::FootstepTracker;
 use person_detector::{ YoloDetector, YoloDetectorConfig, BoundingBox, PersonTracker };
+use std::sync::{ Arc, Mutex };
 
 enum VideoSource {
     Webcam(i32),
@@ -52,9 +54,19 @@ fn main() -> Result<()> {
         ..Default::default()
     };
 
-    let mut pose_detector = PoseDetector::new(config).context(
-        "Failed to initialize pose detector"
-    )?;
+    let worker_count = std::thread
+        ::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+
+    let detector_pool: Arc<Mutex<Vec<PoseDetector>>> = Arc::new(
+        Mutex::new(
+            (0..worker_count)
+                .map(|_| PoseDetector::new(config.clone()))
+                .collect::<Result<Vec<_>>>()
+                .context("Failed to initialize pose detector pool")?
+        )
+    );
 
     // Initialize footstep tracker (footsteps visible for 5 seconds)
     let mut footstep_tracker = FootstepTracker::new(5);
@@ -116,6 +128,8 @@ fn main() -> Result<()> {
     let window_name = "Footstep Tracker - CoreML";
     highgui::named_window(window_name, highgui::WINDOW_AUTOSIZE)?;
 
+    let mut frame_index: usize = 0;
+
     loop {
         let mut frame = Mat::default();
         cap.read(&mut frame)?;
@@ -146,61 +160,93 @@ fn main() -> Result<()> {
         #[cfg(feature = "debug")]
         {
             let yolo_time = start.elapsed();
-            if pose_detector.frame_counter % 30 == 0 {
+            if frame_index % 30 == 0 {
                 println!("YOLO detection time: {:.2?}", yolo_time);
             }
         }
 
         // Stage 2: Run pose detection on each person's bounding box
-        let mut all_keypoints: Vec<Keypoints> = Vec::new();
-        let mut expanded_bboxes: Vec<BoundingBox> = Vec::new();
+        let pose_config = config.clone();
+        let detector_pool = detector_pool.clone();
 
-        let mut keyed_keypoints: Vec<(usize, Keypoints)> = Vec::new();
+        let processed: Vec<(BoundingBox, Option<(usize, Keypoints)>)> = people_with_ids
+            .par_iter()
+            .enumerate()
+            .map(
+                |(person_idx, (person_id, bbox))| -> Result<_> {
+                    let expanded_bbox = bbox.expand(1.4);
 
-        for (person_idx, (person_id, bbox)) in people_with_ids.iter().enumerate() {
-            // Expand bounding box slightly for better coverage
-            let expanded_bbox = bbox.expand(1.4);
-            expanded_bboxes.push(expanded_bbox.clone());
+                    let person_crop = YoloDetector::crop_region(
+                        &frame,
+                        &expanded_bbox,
+                        pose_config.input_height
+                    )?;
 
-            // Crop the person region
-            let person_crop = YoloDetector::crop_region(
-                &frame,
-                &expanded_bbox,
-                pose_detector.config.input_height
-            )?;
+                    let mut detector = match (
+                        {
+                            let mut pool = detector_pool.lock().unwrap();
+                            pool.pop()
+                        }
+                    ) {
+                        Some(det) => det,
+                        None =>
+                            PoseDetector::new(pose_config.clone()).context(
+                                "Failed to initialize pose detector for worker"
+                            )?,
+                    };
 
-            // Detect pose in the cropped region
-            let mut person_keypoints_batch = pose_detector.detect_pose(&person_crop)?;
+                    let mut keyed = None;
+                    if let Ok(mut person_keypoints_batch) = detector.detect_pose(&person_crop) {
+                        if let Some(person_keypoints) = person_keypoints_batch.first_mut() {
+                            let (x, y, w, h) = expanded_bbox.to_pixels(frame.cols(), frame.rows());
 
-            // Transform keypoints back to original frame coordinates
-            if let Some(person_keypoints) = person_keypoints_batch.first_mut() {
-                let (x, y, w, h) = expanded_bbox.to_pixels(frame.cols(), frame.rows());
+                            for kp in person_keypoints.iter_mut() {
+                                kp[1] = (kp[1] * (w as f32) + (x as f32)) / (frame.cols() as f32);
+                                kp[0] = (kp[0] * (h as f32) + (y as f32)) / (frame.rows() as f32);
+                            }
 
-                for kp in person_keypoints.iter_mut() {
-                    // kp[0] is y (normalized), kp[1] is x (normalized)
-                    // Convert from crop coordinates to frame coordinates
-                    kp[1] = (kp[1] * (w as f32) + (x as f32)) / (frame.cols() as f32);
-                    kp[0] = (kp[0] * (h as f32) + (y as f32)) / (frame.rows() as f32);
+                            keyed = Some((*person_id, person_keypoints.clone()));
+                        }
+
+                        #[cfg(feature = "debug")]
+                        {
+                            if frame_index % 30 == 0 {
+                                println!(
+                                    "Person {}: bbox confidence={:.2}",
+                                    person_idx,
+                                    bbox.confidence
+                                );
+                            }
+                        }
+                    }
+
+                    {
+                        let mut pool = detector_pool.lock().unwrap();
+                        pool.push(detector);
+                    }
+
+                    Ok((expanded_bbox, keyed))
                 }
+            )
+            .collect::<Result<Vec<_>>>()?;
 
-                keyed_keypoints.push((*person_id, person_keypoints.clone()));
-            }
+        let expanded_bboxes: Vec<BoundingBox> = processed
+            .iter()
+            .map(|(bbox, _)| bbox.clone())
+            .collect();
 
-            #[cfg(feature = "debug")]
-            {
-                if pose_detector.frame_counter % 30 == 0 {
-                    println!("Person {}: bbox confidence={:.2}", person_idx, bbox.confidence);
-                }
-            }
-        }
+        let keyed_keypoints: Vec<(usize, Keypoints)> = processed
+            .into_iter()
+            .filter_map(|(_, keyed)| keyed)
+            .collect();
 
         #[cfg(feature = "debug")]
         {
-            if pose_detector.frame_counter % 30 == 0 {
+            if frame_index % 30 == 0 {
                 let total_time = start.elapsed();
                 println!(
                     "Total detection time (YOLO + {} poses): {:.2?}",
-                    people.len(),
+                    people_with_ids.len(),
                     total_time
                 );
             }
@@ -226,6 +272,8 @@ fn main() -> Result<()> {
         if highgui::wait_key(1)? == (b'q' as i32) {
             break;
         }
+
+        frame_index = frame_index.wrapping_add(1);
     }
 
     Ok(())

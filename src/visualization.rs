@@ -200,7 +200,7 @@ pub fn draw_footsteps(
             faded_color[2] *= opacity as f64;
 
             // Draw filled circle for footstep
-            let radius = 12;
+            let radius = 5;
             imgproc::circle(
                 frame,
                 core::Point::new(x, y),

@@ -9,6 +9,7 @@ coreml-rs = { path = "./coreml-rs" }
 ndarray = "0.16"
 anyhow = "1.0"
 half = "2.3"
+rayon = "1.11.0"
 
 [profile.release]
 opt-level = 3
