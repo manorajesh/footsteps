@@ -38,8 +38,17 @@ pub type MultiPoseKeypoints = Vec<Keypoints>;
 #[derive(Debug, Clone)]
 pub struct PoseDetectorConfig {
     pub model_path: String,
-    pub model_input_size: usize,
+    pub input_width: usize,
+    pub input_height: usize,
     pub num_keypoints: usize,
+
+    // RTMPose normalization
+    pub mean: [f32; 3],
+    pub std: [f32; 3],
+
+    // SimCC
+    pub simcc_split_ratio: f32,
+
     /// Confidence threshold below which we use temporal smoothing more aggressively
     pub low_confidence_threshold: f32,
     /// Smoothing factor for exponential moving average (0.0 = use only current, 1.0 = use only previous)
@@ -51,12 +60,16 @@ pub struct PoseDetectorConfig {
 impl Default for PoseDetectorConfig {
     fn default() -> Self {
         Self {
-            model_path: "models/movenet_singlepose_lightning.mlpackage".to_string(),
-            model_input_size: 256,
+            model_path: "models/rtmpose.mlpackage".to_string(),
+            input_width: 192,
+            input_height: 256,
             num_keypoints: 17,
+            mean: [123.675, 116.28, 103.53],
+            std: [58.395, 57.12, 57.375],
+            simcc_split_ratio: 2.0,
             low_confidence_threshold: 0.2,
-            smoothing_alpha: 0.8,
-            low_confidence_alpha: 0.9,
+            smoothing_alpha: 0.3,
+            low_confidence_alpha: 0.7,
         }
     }
 }
@@ -88,7 +101,7 @@ impl PoseDetector {
         {
             println!("✓ CoreML model loaded with Neural Engine acceleration!");
             println!("Model: {}", config.model_path);
-            println!("Input size: {}", config.model_input_size);
+            println!("Input size: {}x{} (WxH)", config.input_width, config.input_height);
         }
 
         #[cfg(feature = "debug")]
@@ -103,16 +116,14 @@ impl PoseDetector {
         })
     }
 
-    /// Preprocess a frame for inference
-    fn preprocess_frame(&self, frame: &Mat) -> Result<Mat> {
+    /// Preprocess a cropped person patch for RTMPose (resize -> RGB -> normalize -> NCHW tensor)
+    fn preprocess_frame(&self, crop_bgr: &Mat) -> Result<Array4<f32>> {
+        // 1. Resize crop to model size (W,H = 192x256)
         let mut resized = Mat::default();
-        let size = core::Size::new(
-            self.config.model_input_size as i32,
-            self.config.model_input_size as i32
-        );
+        let size = core::Size::new(self.config.input_width as i32, self.config.input_height as i32);
+        imgproc::resize(crop_bgr, &mut resized, size, 0.0, 0.0, imgproc::INTER_LINEAR)?;
 
-        imgproc::resize(frame, &mut resized, size, 0.0, 0.0, imgproc::INTER_LINEAR)?;
-
+        // 2. BGR -> RGB
         let mut rgb = Mat::default();
         imgproc::cvt_color(
             &resized,
@@ -122,37 +133,46 @@ impl PoseDetector {
             core::AlgorithmHint::ALGO_HINT_DEFAULT
         )?;
 
-        Ok(rgb)
-    }
+        let h = self.config.input_height;
+        let w = self.config.input_width;
+        let hw = h * w;
 
-    /// Detect poses in a frame
-    pub fn detect_pose(&mut self, frame: &Mat) -> Result<MultiPoseKeypoints> {
-        // Preprocess
-        let input_tensor = self.preprocess_frame(frame)?;
+        // 3. Convert to NCHW f32 with RTMPose normalization
+        let raw = rgb.data_bytes()?;
+        assert_eq!(raw.len(), h * w * 3);
 
-        // Convert to f32 tensor
-        let mut input_data =
-            vec![0f32; self.config.model_input_size * self.config.model_input_size * 3];
-        let raw_data = input_tensor.data_bytes()?;
+        let mut nchw = vec![0f32; 3 * h * w];
 
-        for (i, &byte) in raw_data.iter().enumerate() {
-            if i < input_data.len() {
-                input_data[i] = byte as f32;
+        let mean = self.config.mean;
+        let std = self.config.std;
+
+        for y in 0..h {
+            for x in 0..w {
+                let src_idx = (y * w + x) * 3;
+                let r = raw[src_idx] as f32;
+                let g = raw[src_idx + 1] as f32;
+                let b = raw[src_idx + 2] as f32;
+
+                let base = y * w + x;
+                nchw[0 * hw + base] = (r - mean[0]) / std[0]; // R
+                nchw[1 * hw + base] = (g - mean[1]) / std[1]; // G
+                nchw[2 * hw + base] = (b - mean[2]) / std[2]; // B
             }
         }
 
-        // Create input tensor for CoreML
-        let input_array = Array4::from_shape_vec(
-            (1, self.config.model_input_size, self.config.model_input_size, 3),
-            input_data
-        )?;
+        let input_array = Array4::from_shape_vec((1, 3, h, w), nchw)?;
+        Ok(input_array)
+    }
 
-        // Add input to CoreML model
+    /// Detect poses for a cropped person patch using RTMPose SimCC decoding
+    pub fn detect_pose(&mut self, person_crop: &Mat) -> Result<MultiPoseKeypoints> {
+        // 1. Preprocess crop -> NCHW tensor
+        let input_array = self.preprocess_frame(person_crop)?;
+
         self.model
             .add_input("input", input_array.into_dyn())
             .map_err(|e| anyhow::anyhow!("Failed to add input to CoreML model: {:?}", e))?;
 
-        // Run inference
         #[cfg(feature = "debug")]
         let start = std::time::Instant::now();
 
@@ -163,113 +183,111 @@ impl PoseDetector {
         #[cfg(feature = "debug")]
         {
             self.frame_counter += 1;
-            if self.frame_counter % 30 == 0 {
-                let elapsed = start.elapsed();
-                println!("Inference time: {:.2}ms", elapsed.as_secs_f32() * 1000.0);
-            }
-        }
-
-        // Extract Float32 output
-        // First, let's see what outputs are available
-        #[cfg(feature = "debug")]
-        {
             if self.frame_counter == 1 {
                 println!("Available outputs: {:?}", outputs.outputs.keys().collect::<Vec<_>>());
             }
+            if self.frame_counter % 30 == 0 {
+                let elapsed = start.elapsed();
+                println!("RTMPose inference time: {:.2}ms", elapsed.as_secs_f32() * 1000.0);
+            }
         }
 
-        let ml_array = outputs.outputs
-            .remove("Identity")
-            .ok_or_else(|| anyhow::anyhow!("Output 'Identity' not found"))?;
+        // 2. Extract SimCC outputs
+        let x_logits_array = outputs.outputs
+            .remove("linear_3")
+            .ok_or_else(|| anyhow::anyhow!("Output 'linear_3' not found"))?;
+        let y_logits_array = outputs.outputs
+            .remove("linear_4")
+            .ok_or_else(|| anyhow::anyhow!("Output 'linear_4' not found"))?;
 
-        // Extract Float16 output and convert to f32
-        let output_u16_array = ml_array.extract_to_tensor::<u16>();
-        let (output_u16, _) = output_u16_array.into_raw_vec_and_offset();
-
-        // Convert u16 (Float16 bits) to f32
-        let output_data: Vec<f32> = output_u16
+        // CoreML Float16 -> f32
+        let x_u16 = x_logits_array.extract_to_tensor::<u16>();
+        let (x_bits, _) = x_u16.into_raw_vec_and_offset();
+        let x_logits: Vec<f32> = x_bits
             .iter()
-            .map(|&bits| half::f16::from_bits(bits).to_f32())
+            .map(|&b| half::f16::from_bits(b).to_f32())
             .collect();
+
+        let y_u16 = y_logits_array.extract_to_tensor::<u16>();
+        let (y_bits, _) = y_u16.into_raw_vec_and_offset();
+        let y_logits: Vec<f32> = y_bits
+            .iter()
+            .map(|&b| half::f16::from_bits(b).to_f32())
+            .collect();
+
+        let k = self.config.num_keypoints;
+        let w_in = self.config.input_width as f32; // 192
+        let h_in = self.config.input_height as f32; // 256
+        let wx = (w_in * self.config.simcc_split_ratio) as usize; // 384
+        let wy = (h_in * self.config.simcc_split_ratio) as usize; // 512
 
         #[cfg(feature = "debug")]
         {
             if self.frame_counter == 1 {
-                println!("Output shape: {} values", output_data.len());
-                println!("Expected for singlepose: 1 * 1 * 17 * 3 = 51 values");
-                if output_data.len() >= 15 {
-                    println!("First 5 keypoints (y, x, conf):");
-                    for i in 0..5 {
-                        let offset = i * 3;
-                        println!(
-                            "  KP{}: y={:.3}, x={:.3}, conf={:.3}",
-                            i,
-                            output_data[offset],
-                            output_data[offset + 1],
-                            output_data[offset + 2]
-                        );
-                    }
-                }
-                // Show some stats
-                let max_val = output_data.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-                let min_val = output_data.iter().cloned().fold(f32::INFINITY, f32::min);
-                println!("Output range: [{:.3}, {:.3}]", min_val, max_val);
+                println!("X logits len: {}, expected: {}", x_logits.len(), k * wx);
+                println!("Y logits len: {}, expected: {}", y_logits.len(), k * wy);
             }
         }
 
-        // Parse singlepose output: [1, 1, 17, 3]
-        // Single person with 17 keypoints, each with (y, x, confidence)
-        // Note: Output format is [batch, instance, keypoint, coords] = [1, 1, 17, 3]
-        let mut all_keypoints = Vec::new();
+        let mut person_keypoints: Keypoints = Vec::with_capacity(k);
 
-        // Extract keypoints for the single person
-        let mut person_keypoints = Vec::new();
+        for kp_idx in 0..k {
+            let x_start = kp_idx * wx;
+            let y_start = kp_idx * wy;
 
-        // Check if we have enough data
-        if output_data.len() < self.config.num_keypoints * 3 {
-            #[cfg(feature = "debug")]
-            println!(
-                "Warning: Output size {} is less than expected {}",
-                output_data.len(),
-                self.config.num_keypoints * 3
-            );
-            return Ok(Vec::new());
+            if x_start + wx > x_logits.len() || y_start + wy > y_logits.len() {
+                continue;
+            }
+
+            let px_logits = &x_logits[x_start..x_start + wx];
+            let py_logits = &y_logits[y_start..y_start + wy];
+
+            // Argmax over SimCC logits (no softmax)
+            let (mut x_idx, mut max_x) = (0usize, f32::NEG_INFINITY);
+            for (i, &v) in px_logits.iter().enumerate() {
+                if v > max_x {
+                    max_x = v;
+                    x_idx = i;
+                }
+            }
+
+            let (mut y_idx, mut max_y) = (0usize, f32::NEG_INFINITY);
+            for (j, &v) in py_logits.iter().enumerate() {
+                if v > max_y {
+                    max_y = v;
+                    y_idx = j;
+                }
+            }
+
+            // Convert to patch pixel coordinates
+            let u = (x_idx as f32) / self.config.simcc_split_ratio; // [0,192)
+            let v = (y_idx as f32) / self.config.simcc_split_ratio; // [0,256)
+
+            // Confidence similar to official approach
+            let score = max_x.min(max_y);
+
+            // Normalize to crop coordinates (0-1)
+            let x_norm = u / w_in;
+            let y_norm = v / h_in;
+
+            person_keypoints.push([y_norm, x_norm, score]);
         }
 
-        for i in 0..self.config.num_keypoints {
-            let offset = i * 3;
-            let kp = [
-                output_data[offset + 0], // y
-                output_data[offset + 1], // x
-                output_data[offset + 2], // confidence
-            ];
-            person_keypoints.push(kp);
-        }
+        // Single-person per crop => MultiPoseKeypoints with 1 element if confident enough
+        let mut all = Vec::new();
 
         let high_conf_count = person_keypoints
             .iter()
             .filter(|kp| kp[2] > CONFIDENCE_THRESHOLD)
             .count();
 
-        // Add person if at least 5 keypoints have good confidence (more lenient than average)
         if high_conf_count >= 5 {
-            all_keypoints.push(person_keypoints);
-        } else {
-            #[cfg(feature = "debug")]
-            {
-                if self.frame_counter <= 3 {
-                    println!("Skipping detection: only {} keypoints above threshold", high_conf_count);
-                }
-            }
+            all.push(person_keypoints);
         }
 
-        // Apply temporal smoothing
-        let smoothed_keypoints = self.apply_temporal_smoothing(all_keypoints);
-
-        // Store for next frame
-        self.previous_keypoints = Some(smoothed_keypoints.clone());
-
-        Ok(smoothed_keypoints)
+        // let smoothed = self.apply_temporal_smoothing(all);
+        // self.previous_keypoints = Some(smoothed.clone());
+        Ok(all)
     }
 
     /// Apply temporal smoothing to reduce jitter

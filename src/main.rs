@@ -6,11 +6,9 @@ mod person_detector;
 use anyhow::{ Context, Result };
 use opencv::{ highgui, prelude::*, videoio };
 use pose_detector::{ PoseDetector, PoseDetectorConfig, Keypoints };
-use visualization::{ draw_all_keypoints, draw_footsteps, draw_bounding_boxes };
+use visualization::{ draw_all_keypoints, draw_all_ankles, draw_footsteps, draw_bounding_boxes };
 use footstep_tracker::FootstepTracker;
 use person_detector::{ YoloDetector, YoloDetectorConfig, BoundingBox };
-
-use crate::visualization::draw_all_ankles;
 
 enum VideoSource {
     Webcam(i32),
@@ -24,7 +22,7 @@ fn main() -> Result<()> {
     let model_path = if args.len() > 1 {
         args[1].clone()
     } else {
-        "models/movenet_singlepose_lightning.mlpackage".to_string()
+        "models/rtmpose.mlpackage".to_string()
     };
 
     // Determine video source: file path or camera ID
@@ -162,7 +160,7 @@ fn main() -> Result<()> {
             let person_crop = YoloDetector::crop_region(
                 &frame,
                 &expanded_bbox,
-                pose_detector.config.model_input_size
+                pose_detector.config.input_height
             )?;
 
             // Detect pose in the cropped region
