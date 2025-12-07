@@ -1,6 +1,10 @@
 # Footstep Tracker
 
 ![Build Status](https://github.com/manorajesh/footsteps/actions/workflows/rust.yml/badge.svg)
+![Downloads](https://img.shields.io/crates/d/footstep-tracker)
+![Version](https://img.shields.io/crates/v/footstep-tracker)
+![License](https://img.shields.io/crates/l/footstep-tracker)
+![Size](https://img.shields.io/crates/size/footstep-tracker)
 
 <div align="center">
   <img src="https://github.com/manorajesh/footsteps/blob/8b07a8251b91a4464efb1c49fd9ba6742838aa2a/images/screenshot.png?raw=true" alt="Footstep Tracker Screenshot" width="80%">
