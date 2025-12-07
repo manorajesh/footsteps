@@ -20,7 +20,7 @@ fn main() -> Result<()> {
     let model_path = if args.len() > 1 {
         args[1].clone()
     } else {
-        "models/movenet_multipose.mlpackage".to_string()
+        "models/movenet_singlepose_lightning.mlpackage".to_string()
     };
 
     // Determine video source: file path or camera ID

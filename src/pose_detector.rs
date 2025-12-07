@@ -52,10 +52,10 @@ pub struct PoseDetectorConfig {
 impl Default for PoseDetectorConfig {
     fn default() -> Self {
         Self {
-            model_path: "models/movenet_multipose.mlmodelc".to_string(),
+            model_path: "models/movenet_singlepose_lightning.mlpackage".to_string(),
             model_input_size: 256,
             num_keypoints: 17,
-            max_people: 6,
+            max_people: 1,
             low_confidence_threshold: 0.5,
             smoothing_alpha: 0.3,
             low_confidence_alpha: 0.7,
@@ -171,11 +171,20 @@ impl PoseDetector {
             }
         }
 
-        // Extract Float16 output and convert to f32
+        // Extract Float32 output
+        // First, let's see what outputs are available
+        #[cfg(feature = "debug")]
+        {
+            if self.frame_counter == 1 {
+                println!("Available outputs: {:?}", outputs.outputs.keys().collect::<Vec<_>>());
+            }
+        }
+
         let ml_array = outputs.outputs
             .remove("Identity")
             .ok_or_else(|| anyhow::anyhow!("Output 'Identity' not found"))?;
 
+        // Extract Float16 output and convert to f32
         let output_u16_array = ml_array.extract_to_tensor::<u16>();
         let (output_u16, _) = output_u16_array.into_raw_vec_and_offset();
 
@@ -185,31 +194,75 @@ impl PoseDetector {
             .map(|&bits| half::f16::from_bits(bits).to_f32())
             .collect();
 
-        // Parse multipose output: [1, 6, 56]
-        // Each person has 56 values: 17 keypoints * 3 + 4 bbox + 1 score
+        #[cfg(feature = "debug")]
+        {
+            if self.frame_counter == 1 {
+                println!("Output shape: {} values", output_data.len());
+                println!("Expected for singlepose: 1 * 1 * 17 * 3 = 51 values");
+                if output_data.len() >= 15 {
+                    println!("First 5 keypoints (y, x, conf):");
+                    for i in 0..5 {
+                        let offset = i * 3;
+                        println!(
+                            "  KP{}: y={:.3}, x={:.3}, conf={:.3}",
+                            i,
+                            output_data[offset],
+                            output_data[offset + 1],
+                            output_data[offset + 2]
+                        );
+                    }
+                }
+                // Show some stats
+                let max_val = output_data.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                let min_val = output_data.iter().cloned().fold(f32::INFINITY, f32::min);
+                println!("Output range: [{:.3}, {:.3}]", min_val, max_val);
+            }
+        }
+
+        // Parse singlepose output: [1, 1, 17, 3]
+        // Single person with 17 keypoints, each with (y, x, confidence)
+        // Note: Output format is [batch, instance, keypoint, coords] = [1, 1, 17, 3]
         let mut all_keypoints = Vec::new();
 
-        for person in 0..self.config.max_people {
-            let person_offset = person * 56;
+        // Extract keypoints for the single person
+        let mut person_keypoints = Vec::new();
 
-            // Check overall detection score (last value for this person)
-            let detection_score = output_data[person_offset + 55];
+        // Check if we have enough data
+        if output_data.len() < self.config.num_keypoints * 3 {
+            #[cfg(feature = "debug")]
+            println!(
+                "Warning: Output size {} is less than expected {}",
+                output_data.len(),
+                self.config.num_keypoints * 3
+            );
+            return Ok(Vec::new());
+        }
 
-            // Skip people with low detection confidence
-            if detection_score < CONFIDENCE_THRESHOLD {
-                continue;
-            }
+        for i in 0..self.config.num_keypoints {
+            let offset = i * 3;
+            let kp = [
+                output_data[offset + 0], // y
+                output_data[offset + 1], // x
+                output_data[offset + 2], // confidence
+            ];
+            person_keypoints.push(kp);
+        }
 
-            let mut person_keypoints = Vec::new();
-            for i in 0..self.config.num_keypoints {
-                let kp = [
-                    output_data[person_offset + i * 3 + 0], // y
-                    output_data[person_offset + i * 3 + 1], // x
-                    output_data[person_offset + i * 3 + 2], // confidence
-                ];
-                person_keypoints.push(kp);
-            }
+        let high_conf_count = person_keypoints
+            .iter()
+            .filter(|kp| kp[2] > CONFIDENCE_THRESHOLD)
+            .count();
+
+        // Add person if at least 5 keypoints have good confidence (more lenient than average)
+        if high_conf_count >= 5 {
             all_keypoints.push(person_keypoints);
+        } else {
+            #[cfg(feature = "debug")]
+            {
+                if self.frame_counter <= 3 {
+                    println!("Skipping detection: only {} keypoints above threshold", high_conf_count);
+                }
+            }
         }
 
         // Apply temporal smoothing

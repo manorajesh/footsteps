@@ -5,7 +5,7 @@ import coremltools as ct
 from pathlib import Path
 
 # Path to the SavedModel directory
-SAVED_MODEL_DIR = Path("models/movenet-tensorflow2-multipose-lightning-v1")
+SAVED_MODEL_DIR = Path("models/movenet-tensorflow2-singlepose-thunder-v4")
 
 print(f"Loading SavedModel from: {SAVED_MODEL_DIR}")
 
@@ -46,7 +46,7 @@ mlmodel = ct.convert(
 )
 
 # Save to models directory
-output_path = Path("models/movenet_multipose.mlpackage")
+output_path = Path("models/movenet_singlepose_thunder.mlpackage")
 mlmodel.save(str(output_path))
 
 print(f"\n{'='*60}")
@@ -55,6 +55,6 @@ print('='*60)
 print(f"Saved: {output_path}")
 print(f"\nNow compile the model:")
 print(f"  cd models")
-print(f"  xcrun coremlcompiler compile movenet_multipose.mlpackage .")
+print(f"  xcrun coremlcompiler compile movenet_singlepose_thunder.mlpackage .")
 print(f"\nThen run the app:")
-print(f"  cargo run --release -- models/movenet_multipose.mlmodelc")
+print(f"  cargo run --release -- models/movenet_singlepose_thunder.mlmodelc")
