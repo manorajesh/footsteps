@@ -5,6 +5,7 @@ mod person_detector;
 mod udp;
 
 use anyhow::{ Context, Result };
+use clap::Parser;
 use opencv::{ highgui, prelude::*, videoio };
 use rayon::prelude::*;
 use pose_detector::{ PoseDetector, PoseDetectorConfig, Keypoints };
@@ -29,38 +30,46 @@ fn init_tracing() {
     let _ = tracing_subscriber::fmt().with_env_filter(filter).with_ansi(true).try_init();
 }
 
+#[derive(Clone, Debug)]
 enum VideoSource {
     Webcam(i32),
     File(String),
+}
+
+#[derive(Parser, Debug)]
+#[command(name = "footstep-tracker", about = "Footstep tracking demo", version, author)]
+struct Args {
+    /// Path to the CoreML pose detection model package
+    #[arg(default_value = "models/rtmpose.mlpackage", value_name = "MODEL_PATH")]
+    model_path: String,
+
+    /// Video source: camera ID (e.g., 0) or video file path
+    #[arg(
+        default_value = "0",
+        value_name = "CAMERA_ID|VIDEO_FILE",
+        value_parser = parse_video_source
+    )]
+    video: VideoSource,
+}
+
+fn parse_video_source(input: &str) -> Result<VideoSource, String> {
+    if input.contains('.') || input.contains('/') {
+        return Ok(VideoSource::File(input.to_string()));
+    }
+
+    match input.parse::<i32>() {
+        Ok(id) => Ok(VideoSource::Webcam(id)),
+        Err(_) => Ok(VideoSource::Webcam(0)),
+    }
 }
 
 fn main() -> Result<()> {
     #[cfg(feature = "debug")]
     init_tracing();
 
-    // Parse command line arguments
-    let args: Vec<String> = std::env::args().collect();
-
-    let model_path = if args.len() > 1 {
-        args[1].clone()
-    } else {
-        "models/rtmpose.mlpackage".to_string()
-    };
-
-    // Determine video source: file path or camera ID
-    let video_source = if args.len() > 2 {
-        let arg = &args[2];
-        // Check if it's a file path (contains '.' or '/')
-        if arg.contains('.') || arg.contains('/') {
-            VideoSource::File(arg.clone())
-        } else {
-            // Try to parse as camera ID
-            let camera_id = arg.parse().unwrap_or(0);
-            VideoSource::Webcam(camera_id)
-        }
-    } else {
-        VideoSource::Webcam(0)
-    };
+    let args = Args::parse();
+    let model_path = args.model_path;
+    let video_source = args.video;
 
     // Configure and initialize the YOLO person detector
     let yolo_config = YoloDetectorConfig::default();
