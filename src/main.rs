@@ -2,8 +2,6 @@ mod pose_detector;
 mod visualization;
 mod footstep_tracker;
 mod person_detector;
-mod access;
-mod get_direction;
 
 use anyhow::{ Context, Result };
 use opencv::{ highgui, prelude::*, videoio };
@@ -265,8 +263,9 @@ fn main() -> Result<()> {
         // draw_all_ankles(&mut frame, &all_keypoints, 0.1)?;
 
         // Draw footsteps
-        let all_footsteps = footstep_tracker.get_all_footsteps();
-        draw_footsteps(&mut frame, &all_footsteps)?;
+        let active_footsteps = footstep_tracker.get_all_footsteps();
+        let archived = footstep_tracker.get_archived_footsteps();
+        draw_footsteps(&mut frame, &active_footsteps, archived)?;
 
         highgui::imshow(window_name, &frame)?;
 

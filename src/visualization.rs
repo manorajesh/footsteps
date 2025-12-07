@@ -174,12 +174,14 @@ fn person_color(person_idx: usize) -> core::Scalar {
 /// Draw footsteps for all people with different colors per person
 pub fn draw_footsteps(
     frame: &mut Mat,
-    all_footsteps: &HashMap<usize, Vec<Footstep>>
+    active_footsteps: &HashMap<usize, Vec<Footstep>>,
+    archived_footsteps: &[(usize, Vec<Footstep>)]
 ) -> Result<()> {
     let height = frame.rows();
     let width = frame.cols();
 
-    for (person_idx, footsteps) in all_footsteps {
+    // Draw active footsteps with age-based fade
+    for (person_idx, footsteps) in active_footsteps {
         let color = person_color(*person_idx);
 
         for footstep in footsteps {
@@ -226,6 +228,21 @@ pub fn draw_footsteps(
                 imgproc::LINE_AA,
                 0
             )?;
+        }
+    }
+
+    // Draw archived footsteps as faint translucent dots (no age fade)
+    for (person_idx, footsteps) in archived_footsteps {
+        let mut color = person_color(*person_idx);
+        color[0] *= 0.25;
+        color[1] *= 0.25;
+        color[2] *= 0.25;
+
+        for footstep in footsteps {
+            let x = (footstep.x * (width as f32)) as i32;
+            let y = (footstep.y * (height as f32)) as i32;
+
+            imgproc::circle(frame, core::Point::new(x, y), 4, color, -1, imgproc::LINE_AA, 0)?;
         }
     }
 
