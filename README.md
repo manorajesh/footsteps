@@ -1,5 +1,7 @@
 # Footstep Tracker
 
+![Build Status](https://github.com/manorajesh/footsteps/actions/workflows/rust.yml/badge.svg)
+
 <div align="center">
   <img src="https://github.com/manorajesh/footsteps/blob/8b07a8251b91a4464efb1c49fd9ba6742838aa2a/images/screenshot.png" alt="Footstep Tracker Screenshot" width="80%">
 </div>
