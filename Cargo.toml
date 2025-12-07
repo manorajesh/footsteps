@@ -1,20 +1,19 @@
 [package]
 name = "footstep-tracker"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Real-time multi-person footstep detection on macOS using CoreML"
 readme = "README.md"
 repository = "https://github.com/manorajesh/footsteps"
 license = "MIT"
 keywords = ["real-time", "pose-estimation", "coreml", "body-tracking"]
-categories = ["utilities", "computer-vision", "machine-learning"]
-exclude = [".vscode", "images", ".github", "AlphaPose", "coreml-rs/tests", "rtmpose_docker", "*.py", "venv", "models"]
-include = ["models/rtmpose.mlpackage", "models/yolo11n.mlpackage"]
+categories = ["computer-vision"]
+include = ["src/**/*", "Cargo.toml", "LICENSE", "README.md"]
 
 
 [dependencies]
 opencv = { version = "0.95", default-features = false, features = ["videoio", "imgcodecs", "imgproc", "highgui"] }
-coreml-rs-fork = { path = "./coreml-rs", version = "0.5.5" }
+coreml-rs-fork = "0.5.5"
 ndarray = "0.16"
 anyhow = "1.0"
 half = "2.3"
