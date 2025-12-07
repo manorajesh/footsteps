@@ -2,16 +2,17 @@ mod pose_detector;
 mod visualization;
 mod footstep_tracker;
 mod person_detector;
+mod udp;
 
 use anyhow::{ Context, Result };
 use opencv::{ highgui, prelude::*, videoio };
 use rayon::prelude::*;
 use pose_detector::{ PoseDetector, PoseDetectorConfig, Keypoints };
 use visualization::{ draw_all_keypoints, draw_all_ankles, draw_footsteps, draw_bounding_boxes };
-use footstep_tracker::{ FootstepTracker, FootstepEvent };
+use footstep_tracker::FootstepTracker;
 use person_detector::{ YoloDetector, YoloDetectorConfig, BoundingBox, PersonTracker };
 use std::sync::{ Arc, Mutex };
-use std::net::{ ToSocketAddrs, UdpSocket };
+use udp::UdpSender;
 
 #[cfg(feature = "debug")]
 use tracing::{ debug, error, info };
@@ -31,53 +32,6 @@ fn init_tracing() {
 enum VideoSource {
     Webcam(i32),
     File(String),
-}
-
-struct UdpSender {
-    socket: UdpSocket,
-    target: std::net::SocketAddr,
-}
-
-impl UdpSender {
-    fn new(target: &str) -> Result<Self> {
-        let normalized = if target.contains(':') {
-            target.to_string()
-        } else {
-            format!("{}:7000", target) // default port when omitted
-        };
-
-        let target = normalized
-            .to_socket_addrs()
-            .context("Failed to resolve UDP target address")?
-            .next()
-            .context("UDP target resolved to no addresses")?;
-
-        let socket = UdpSocket::bind("0.0.0.0:0").context("Failed to bind UDP socket")?;
-
-        #[cfg(feature = "debug")]
-        info!(
-            "UDP socket bound to {}",
-            socket.local_addr().unwrap_or_else(|_| "unknown".parse().unwrap())
-        );
-
-        Ok(Self { socket, target })
-    }
-
-    fn target(&self) -> std::net::SocketAddr {
-        self.target
-    }
-
-    fn send(&self, event: &FootstepEvent) -> Result<()> {
-        let payload = format!("{:.4} {:.4}\n", event.footstep.x, event.footstep.y);
-
-        #[cfg(feature = "debug")]
-        debug!("Sending UDP footstep packet: {:?}", payload);
-        self.socket
-            .send_to(payload.as_bytes(), self.target)
-            .context("Failed to send UDP footstep packet")?;
-
-        Ok(())
-    }
 }
 
 fn main() -> Result<()> {
