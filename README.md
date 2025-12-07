@@ -8,6 +8,7 @@
 
 <div align="center">
   <img src="https://github.com/manorajesh/footsteps/blob/8b07a8251b91a4464efb1c49fd9ba6742838aa2a/images/screenshot.png?raw=true" alt="Footstep Tracker Screenshot" width="80%">
+  <video src="https://github.com/manorajesh/footsteps/blob/3a13f994a0762db1a674eafa8dcc73b295dedded/images/demo_video.mp4?raw=true" width="80%" controls></video>
 </div>
 
 Real-time multi-person footstep detection on macOS using CoreML (YOLOv11 for person boxes + RTMPose for 17-keypoint pose) with OpenCV and Rust.
