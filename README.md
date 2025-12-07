@@ -15,6 +15,7 @@ Real-time multi-person footstep detection on macOS using CoreML (YOLOv11 for per
 
 - Rust toolchain: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 - OpenCV: `brew install opencv`
+- LLVM (if not already installed with Xcode): `brew install llvm`
 - macOS with CoreML available (runs best on Apple Silicon); allow camera access for the terminal/IDE
 
 ## Models

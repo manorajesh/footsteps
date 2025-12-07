@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+        run: |
+          brew install opencv
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            coreml-rs -> target
+
+      - name: Build (release)
+        env:
+          PKG_CONFIG_PATH: "$(brew --prefix opencv)/lib/pkgconfig"
+        run: cargo build --release
+
+      - name: Smoke test CLI (--help)
+        env:
+          PKG_CONFIG_PATH: "$(brew --prefix opencv)/lib/pkgconfig"
+        run: cargo run --release -- --help
