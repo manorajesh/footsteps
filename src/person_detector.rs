@@ -84,6 +84,35 @@ impl BoundingBox {
         let dy = self.y - other.y;
         dx * dx + dy * dy
     }
+
+    pub fn corner_l2_avg(&self, other: &Self) -> f32 {
+        let half_w1 = self.width * 0.5;
+        let half_h1 = self.height * 0.5;
+        let half_w2 = other.width * 0.5;
+        let half_h2 = other.height * 0.5;
+
+        let corners1 = [
+            (self.x - half_w1, self.y - half_h1), // top-left
+            (self.x + half_w1, self.y - half_h1), // top-right
+            (self.x - half_w1, self.y + half_h1), // bottom-left
+            (self.x + half_w1, self.y + half_h1), // bottom-right
+        ];
+
+        let corners2 = [
+            (other.x - half_w2, other.y - half_h2),
+            (other.x + half_w2, other.y - half_h2),
+            (other.x - half_w2, other.y + half_h2),
+            (other.x + half_w2, other.y + half_h2),
+        ];
+
+        let mut acc = 0.0;
+        for i in 0..4 {
+            let dx = corners1[i].0 - corners2[i].0;
+            let dy = corners1[i].1 - corners2[i].1;
+            acc += dx * dx + dy * dy;
+        }
+        acc * 0.25
+    }
 }
 
 /// Configuration for YOLO person detector
@@ -289,8 +318,9 @@ impl PersonTracker {
         let mut used_tracks = std::collections::HashSet::new();
 
         for det in detections.into_iter() {
-            // Find best matching track by IoU, fallback to center distance
-            let mut best: Option<(usize, f32, f32)> = None; // (id, iou, dist2)
+            // Find best matching track using IoU, center distance, and corner alignment to handle
+            // drastic box size changes that still share corners.
+            let mut best: Option<(usize, f32, f32, f32)> = None; // (id, iou, dist2, corner_avg)
 
             for (id, track) in self.tracks.iter() {
                 if used_tracks.contains(id) {
@@ -299,23 +329,37 @@ impl PersonTracker {
 
                 let iou = det.iou(&track.bbox);
                 let dist2 = det.center_distance2(&track.bbox);
+                let corner_avg = det.corner_l2_avg(&track.bbox);
 
-                // Prefer IoU; if multiple, pick highest IoU then smallest distance
-                if iou > 0.3 || dist2 < 0.02 * 0.02 {
+                // Accept candidates that have decent overlap, are nearby, or share corner alignment
+                // even if the box scale changed a lot.
+                let nearby = dist2 < 0.02 * 0.02;
+                let aligned_corners = corner_avg < 0.05 * 0.05;
+                let overlaps = iou > 0.15;
+
+                if overlaps || nearby || aligned_corners {
                     match best {
-                        Some((_, best_iou, best_dist2)) => {
-                            if iou > best_iou || (iou == best_iou && dist2 < best_dist2) {
-                                best = Some((*id, iou, dist2));
+                        Some((_, best_iou, best_dist2, best_corner)) => {
+                            let better_iou = iou > best_iou;
+                            let tie_iou_better_corner =
+                                (iou - best_iou).abs() < 1e-6 && corner_avg < best_corner;
+                            let tie_corner_better_dist =
+                                (iou - best_iou).abs() < 1e-6 &&
+                                (corner_avg - best_corner).abs() < 1e-6 &&
+                                dist2 < best_dist2;
+
+                            if better_iou || tie_iou_better_corner || tie_corner_better_dist {
+                                best = Some((*id, iou, dist2, corner_avg));
                             }
                         }
                         None => {
-                            best = Some((*id, iou, dist2));
+                            best = Some((*id, iou, dist2, corner_avg));
                         }
                     }
                 }
             }
 
-            let assigned_id = if let Some((id, _, _)) = best {
+            let assigned_id = if let Some((id, _, _, _)) = best {
                 used_tracks.insert(id);
                 id
             } else {
