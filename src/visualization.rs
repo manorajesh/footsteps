@@ -174,8 +174,7 @@ fn person_color(person_idx: usize) -> core::Scalar {
 /// Draw footsteps for all people with different colors per person
 pub fn draw_footsteps(
     frame: &mut Mat,
-    active_footsteps: &HashMap<usize, Vec<Footstep>>,
-    archived_footsteps: &[(usize, Vec<Footstep>)]
+    active_footsteps: &HashMap<usize, Vec<Footstep>>
 ) -> Result<()> {
     let height = frame.rows();
     let width = frame.cols();
@@ -257,9 +256,20 @@ pub fn draw_footsteps(
         }
     }
 
-    // Draw archived footsteps as faint translucent dots (no age fade)
+    Ok(())
+}
+
+/// Draw archived footsteps (e.g., matched histories) as faint traces
+pub fn draw_archived_footsteps(
+    frame: &mut Mat,
+    archived_footsteps: &[(usize, Vec<Footstep>)]
+) -> Result<()> {
+    let height = frame.rows();
+    let width = frame.cols();
+
     for (person_idx, footsteps) in archived_footsteps {
         let mut color = person_color(*person_idx);
+        // Fade archived footsteps to distinguish from active
         color[0] *= 0.25;
         color[1] *= 0.25;
         color[2] *= 0.25;

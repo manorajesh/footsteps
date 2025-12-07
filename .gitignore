@@ -13,3 +13,4 @@ target/
 Cargo.lock
 venv/
 *.mp4
+!images/*.mp4

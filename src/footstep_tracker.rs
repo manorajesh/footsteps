@@ -30,6 +30,9 @@ const COOLDOWN_FRAMES: usize = 10;
 const MIN_CONFIDENCE: f32 = 0.2;
 const MOVING_SPEED_THRESH: f32 = 0.01; // ankle clearly moving
 const STILL_SPEED_THRESH: f32 = 0.008; // ankle effectively still
+const HISTORY_MATCH_DISTANCE: f32 = 0.02;
+const HISTORY_DIRECTION_COS_THRESHOLD: f32 = 0.1; // roughly within ~75 degrees
+const HISTORY_DIRECTION_WEIGHT: f32 = 0.4; // scales direction penalty in match cost
 
 #[derive(Debug, Default)]
 struct FootstepHistory {
@@ -50,6 +53,8 @@ struct PersonFootstepTracker {
     left: FootMotionState,
     right: FootMotionState,
     last_seen: Instant,
+    last_pelvis: Option<(f32, f32)>,
+    last_motion_dir: Option<(f32, f32)>,
 }
 
 impl PersonFootstepTracker {
@@ -58,7 +63,34 @@ impl PersonFootstepTracker {
             left: FootMotionState { prev_pos: None, prev_speed: 0.0, cooldown: 0 },
             right: FootMotionState { prev_pos: None, prev_speed: 0.0, cooldown: 0 },
             last_seen: Instant::now(),
+            last_pelvis: None,
+            last_motion_dir: None,
         }
+    }
+
+    fn update_motion_hint(&mut self, pelvis: (f32, f32, f32)) -> ((f32, f32), Option<(f32, f32)>) {
+        let pelvis_pos = (pelvis.0, pelvis.1);
+
+        // Only update motion when pelvis confidence is reasonable
+        let motion_dir = if pelvis.2 < MIN_CONFIDENCE {
+            None
+        } else if let Some(prev) = self.last_pelvis {
+            let dx = pelvis_pos.0 - prev.0;
+            let dy = pelvis_pos.1 - prev.1;
+            let len = (dx * dx + dy * dy).sqrt();
+            if len > f32::EPSILON {
+                Some((dx / len, dy / len))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        self.last_pelvis = Some(pelvis_pos);
+        self.last_motion_dir = motion_dir;
+
+        (pelvis_pos, motion_dir)
     }
 
     fn update(
@@ -204,6 +236,26 @@ impl FootstepHistory {
         }
     }
 
+    fn seed_history(&mut self, person_id: usize, history: Vec<Footstep>) {
+        if history.is_empty() {
+            return;
+        }
+
+        let entry = self.history_map.entry(person_id).or_insert_with(Vec::new);
+        if entry.is_empty() {
+            *entry = history.clone();
+        } else {
+            let mut merged = history.clone();
+            merged.extend(entry.drain(..));
+            *entry = merged;
+        }
+
+        let trail = self.current_trails.entry(person_id).or_insert_with(Vec::new);
+        if trail.is_empty() {
+            *trail = history;
+        }
+    }
+
     fn histories(&self) -> HashMap<usize, Vec<Footstep>> {
         self.history_map.clone()
     }
@@ -239,6 +291,8 @@ pub struct FootstepTracker {
     exit_timeout: Duration,
     /// Archived footsteps for people who have exited the frame
     archived_histories: Vec<(usize, Vec<Footstep>)>,
+    /// Mapping from current active IDs to the archived ID they were matched to
+    archived_matches: HashMap<usize, usize>,
 }
 
 impl FootstepTracker {
@@ -250,6 +304,76 @@ impl FootstepTracker {
             max_match_distance: 0.03,
             exit_timeout: Duration::from_millis(750),
             archived_histories: Vec::new(),
+            archived_matches: HashMap::new(),
+        }
+    }
+
+    fn last_pose_hint(steps: &[Footstep]) -> Option<((f32, f32), Option<(f32, f32)>)> {
+        let last = steps.last()?;
+        let last_pos = (last.x, last.y);
+
+        let dir = if let Some(dir) = last.direction {
+            Some(dir)
+        } else if steps.len() >= 2 {
+            let prev = &steps[steps.len() - 2];
+            let dx = last.x - prev.x;
+            let dy = last.y - prev.y;
+            let mag = (dx * dx + dy * dy).sqrt();
+            if mag > f32::EPSILON {
+                Some((dx / mag, dy / mag))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        Some((last_pos, dir))
+    }
+
+    fn try_match_archived_history(
+        &mut self,
+        person_id: usize,
+        pelvis_pos: (f32, f32),
+        motion_dir: Option<(f32, f32)>
+    ) {
+        if self.archived_matches.contains_key(&person_id) {
+            return;
+        }
+
+        let mut best: Option<(usize, f32, usize)> = None; // (arch_idx, cost, archived_id)
+
+        for (idx, (arch_id, steps)) in self.archived_histories.iter().enumerate() {
+            if let Some((last_pos, hist_dir)) = Self::last_pose_hint(steps) {
+                let dx = last_pos.0 - pelvis_pos.0;
+                let dy = last_pos.1 - pelvis_pos.1;
+                let dist = (dx * dx + dy * dy).sqrt();
+                if dist > HISTORY_MATCH_DISTANCE {
+                    continue;
+                }
+
+                let dir_penalty = match (hist_dir, motion_dir) {
+                    (Some(hd), Some(cd)) => {
+                        let dot = (hd.0 * cd.0 + hd.1 * cd.1).clamp(-1.0, 1.0);
+                        if dot < HISTORY_DIRECTION_COS_THRESHOLD {
+                            continue;
+                        }
+                        1.0 - dot
+                    }
+                    _ => 0.0,
+                };
+
+                let cost = dist + dir_penalty * HISTORY_DIRECTION_WEIGHT;
+                if best.map_or(true, |(_, c, _)| cost < c) {
+                    best = Some((idx, cost, *arch_id));
+                }
+            }
+        }
+
+        if let Some((idx, _, arch_id)) = best {
+            let (_, steps) = self.archived_histories.remove(idx);
+            self.history.seed_history(person_id, steps);
+            self.archived_matches.insert(person_id, arch_id);
         }
     }
 
@@ -262,10 +386,6 @@ impl FootstepTracker {
         for (person_id, person_keypoints) in keyed_keypoints.iter() {
             active_ids.insert(*person_id);
 
-            let tracker = self.person_trackers
-                .entry(*person_id)
-                .or_insert_with(PersonFootstepTracker::new);
-
             // Extract ankle and hip positions
             let left_ankle = person_keypoints[Keypoint::LeftAnkle as usize];
             let right_ankle = person_keypoints[Keypoint::RightAnkle as usize];
@@ -277,6 +397,19 @@ impl FootstepTracker {
                 (left_hip[1] + right_hip[1]) * 0.5,
                 (left_hip[2] + right_hip[2]) * 0.5,
             );
+
+            let (pelvis_pos, motion_dir) = {
+                let tracker = self.person_trackers
+                    .entry(*person_id)
+                    .or_insert_with(PersonFootstepTracker::new);
+                tracker.update_motion_hint(pelvis)
+            };
+
+            self.try_match_archived_history(*person_id, pelvis_pos, motion_dir);
+
+            let tracker = self.person_trackers
+                .get_mut(person_id)
+                .expect("tracker should exist after insertion");
 
             let new_steps = tracker.update(
                 (left_ankle[0], left_ankle[1], left_ankle[2]),
@@ -317,13 +450,21 @@ impl FootstepTracker {
             .collect();
 
         for id in stale_ids {
+            // If this person was previously matched to an archived track, drop it instead of
+            // drawing again as archived to avoid duplicate ghost trails after exit.
+            let was_archived_match = self.archived_matches.remove(&id).is_some();
+
             if let Some(steps) = self.history.take_person(id) {
-                if !steps.is_empty() {
+                if !steps.is_empty() && !was_archived_match {
                     self.archived_histories.push((id, steps));
                 }
             }
+
             self.person_trackers.remove(&id);
         }
+
+        // Drop any archived match links for people not present in the current frame
+        self.archived_matches.retain(|id, _| active_ids.contains(id));
 
         self.history.prune_older_than(self.footstep_display_duration);
 
@@ -346,5 +487,6 @@ impl FootstepTracker {
         self.person_trackers.clear();
         self.history = FootstepHistory::new();
         self.archived_histories.clear();
+        self.archived_matches.clear();
     }
 }

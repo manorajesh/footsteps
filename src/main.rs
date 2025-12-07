@@ -9,7 +9,7 @@ use clap::Parser;
 use opencv::{ highgui, prelude::*, videoio };
 use rayon::prelude::*;
 use pose_detector::{ PoseDetector, PoseDetectorConfig, Keypoints };
-use visualization::{ draw_footsteps, draw_bounding_boxes };
+use visualization::{ draw_footsteps, draw_archived_footsteps, draw_bounding_boxes };
 use footstep_tracker::FootstepTracker;
 use person_detector::{ YoloDetector, YoloDetectorConfig, BoundingBox, PersonTracker };
 use std::sync::{ Arc, Mutex };
@@ -364,7 +364,13 @@ fn main() -> Result<()> {
         // Draw footsteps
         let active_footsteps = footstep_tracker.get_all_footsteps();
         let archived = footstep_tracker.get_archived_footsteps();
-        draw_footsteps(&mut frame, &active_footsteps, archived)?;
+
+        draw_footsteps(&mut frame, &active_footsteps)?;
+
+        // Only show archived traces when we have active people, to avoid ghosts after everyone leaves
+        if !active_footsteps.is_empty() {
+            draw_archived_footsteps(&mut frame, archived)?;
+        }
 
         highgui::imshow(window_name, &frame)?;
 
