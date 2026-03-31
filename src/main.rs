@@ -3,6 +3,7 @@ mod visualization;
 mod footstep_tracker;
 mod person_detector;
 mod udp;
+mod osc;
 
 use anyhow::{ Context, Result };
 use clap::Parser;
@@ -14,6 +15,7 @@ use footstep_tracker::FootstepTracker;
 use person_detector::{ YoloDetector, YoloDetectorConfig, BoundingBox, PersonTracker };
 use std::sync::{ Arc, Mutex };
 use udp::UdpSender;
+use osc::OscSender;
 
 #[cfg(feature = "debug")]
 use tracing::{ debug, error, info };
@@ -51,9 +53,20 @@ struct Args {
     )]
     video: VideoSource,
 
-    /// UDP target address for footstep events (host:port)
+    /// OSC target address for footstep events (host:port)
     #[arg(
         short,
+        long,
+        value_name = "OSC_TARGET",
+        num_args = 0..=1,
+        default_missing_value = "127.0.0.1:7001",
+        default_value = "127.0.0.1:7001"
+    )]
+    osc_target: Option<String>,
+
+    /// UDP target address for footstep events (host:port)
+    #[arg(
+        short = 'u',
         long,
         value_name = "UDP_TARGET",
         num_args = 0..=1,
@@ -85,6 +98,17 @@ fn main() -> Result<()> {
     let mut person_detector = YoloDetector::new(yolo_config).context(
         "Failed to initialize YOLO detector"
     )?;
+
+    let osc_sender = if let Some(osc_target) = args.osc_target {
+        let sender = OscSender::new(&osc_target)?;
+        #[cfg(feature = "debug")]
+        info!("Footstep OSC target: {}", sender.target());
+        Some(sender)
+    } else {
+        #[cfg(feature = "debug")]
+        tracing::warn!("No OSC target specified; footstep events will not be sent over OSC");
+        None
+    };
 
     let udp_sender = if let Some(udp_target) = args.udp_target {
         let sender = UdpSender::new(&udp_target)?;
@@ -330,6 +354,20 @@ fn main() -> Result<()> {
         }
 
         let new_footsteps = footstep_tracker.update(&keyed_keypoints);
+
+        if let Some(sender) = osc_sender.as_ref() {
+            for event in &new_footsteps {
+                #[cfg(feature = "debug")]
+                if let Err(err) = sender.send(event) {
+                    error!("Failed to send OSC footstep packet: {:?}", err);
+                }
+
+                #[cfg(not(feature = "debug"))]
+                {
+                    let _ = sender.send(event);
+                }
+            }
+        }
 
         if let Some(sender) = udp_sender.as_ref() {
             for event in &new_footsteps {

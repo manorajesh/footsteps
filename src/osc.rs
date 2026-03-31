@@ -1,0 +1,62 @@
+use crate::footstep_tracker::FootstepEvent;
+use anyhow::{Context, Result};
+use std::net::{ToSocketAddrs, UdpSocket};
+use rosc::{OscPacket, OscMessage, OscType};
+use rosc::encoder;
+
+#[cfg(feature = "debug")]
+use tracing::{debug, info};
+
+pub struct OscSender {
+    socket: UdpSocket,
+    target: std::net::SocketAddr,
+}
+
+impl OscSender {
+    pub fn new(target: &str) -> Result<Self> {
+        let normalized = if target.contains(':') {
+            target.to_string()
+        } else {
+            format!("{}:7001", target) // default OSC port when omitted
+        };
+
+        let target = normalized
+            .to_socket_addrs()
+            .context("Failed to resolve OSC target address")?
+            .next()
+            .context("OSC target resolved to no addresses")?;
+
+        let socket = UdpSocket::bind("0.0.0.0:0").context("Failed to bind OSC socket")?;
+
+        #[cfg(feature = "debug")]
+        info!(
+            "OSC socket bound to {}",
+            socket.local_addr().unwrap_or_else(|_| "unknown".parse().unwrap())
+        );
+
+        Ok(Self { socket, target })
+    }
+
+    pub fn target(&self) -> std::net::SocketAddr {
+        self.target
+    }
+
+    pub fn send(&self, event: &FootstepEvent) -> Result<()> {
+        let msg_buf = encoder::encode(&OscPacket::Message(OscMessage {
+            addr: "/footstep".to_string(),
+            args: vec![
+                OscType::Float(event.footstep.x),
+                OscType::Float(event.footstep.y),
+                OscType::Int(event.person_id as i32),
+            ],
+        })).context("Failed to encode OSC packet")?;
+
+        #[cfg(feature = "debug")]
+        debug!("Sending OSC footstep packet to {}", self.target);
+        self.socket
+            .send_to(&msg_buf, self.target)
+            .context("Failed to send OSC footstep packet")?;
+
+        Ok(())
+    }
+}
