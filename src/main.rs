@@ -345,10 +345,13 @@ fn main() -> Result<()> {
         {
             if frame_index % 30 == 0 {
                 let total_time = start.elapsed();
-                debug!(
-                    "Total detection time (YOLO + {} poses): {:.2?}",
+                let fps = 1.0 / total_time.as_secs_f64();
+
+                info!(
+                    "Total detection time (YOLO + {} poses): {:.2?} | FPS: {:.1}",
                     people_with_ids.len(),
-                    total_time
+                    total_time,
+                    fps
                 );
             }
         }
