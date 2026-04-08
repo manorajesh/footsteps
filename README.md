@@ -17,9 +17,9 @@ Real-time multi-person footstep detection on macOS using CoreML (YOLOv11 for per
 
 - Runs fully on-device with CoreML (CPU + Apple Neural Engine when available)
 - Detects people with a YOLOv11 CoreML model (`models/yolo11n.mlpackage`)
-- Estimates 17 COCO keypoints per person with an RTMPose SimCC CoreML model (`models/rtmpose.mlpackage`)
+- estimation of 17 COCO keypoints per person with an RTMPose SimCC CoreML model (`models/rtmpose.mlpackage`)
 - Tracks per-person IDs and emits footsteps when ankles stop after moving
-- Optional UDP output of footsteps for downstream consumers (e.g., Unity/TouchDesigner)
+- Optional UDP or OSC output of footsteps for downstream consumers (e.g., Unity/TouchDesigner)
 - Works with webcam or video files; video sources loop automatically
 
 ## Requirements (macOS)
@@ -67,16 +67,22 @@ Real-time multi-person footstep detection on macOS using CoreML (YOLOv11 for per
 
   ```bash
   # camera 1
-  cargo run --release -- models/rtmpose.mlpackage 1
+  cargo run --release -- -m models/rtmpose.mlpackage 1
 
   # mp4 file (auto-loops)
-  cargo run --release -- models/rtmpose.mlpackage /path/to/video.mp4
+  cargo run --release -- -m models/rtmpose.mlpackage /path/to/video.mp4
   ```
 
-- UDP output for footsteps (sends `"<x> <y>"` normalized to 0-1):
+- OSC output for footsteps (sends `/footstep` with data over UDP):
 
   ```bash
-  FOOTSTEP_UDP_ADDR=192.168.1.42:5005 cargo run --release -- models/rtmpose.mlpackage
+  cargo run --release -- -m models/rtmpose.mlpackage -o 192.168.1.42:7001
+  ```
+
+- UDP output for footsteps (sends space-separated text payload):
+
+  ```bash
+  cargo run --release -- -m models/rtmpose.mlpackage -u 192.168.1.42:7000
   ```
 
 - Controls: press `q` to quit.
@@ -91,10 +97,18 @@ Real-time multi-person footstep detection on macOS using CoreML (YOLOv11 for per
 6. Detect footsteps when ankles transition from moving to still; keep recent trails and archive past visitors
 7. Draw IDs, boxes, and footsteps (color-coded per person) and optionally emit UDP events
 
-## Coordinates
+## Coordinates and Payload Formats
 
 - Keypoints and footsteps are normalized to the frame: `x` and `y` are in `[0,1]`.
-- UDP payload per footstep: `<x> <y>` on a single line (e.g., `0.4123 0.7831`).
+
+**UDP:** 
+Payload per footstep is sent as a `\n` terminated text string.
+Format: `x y person_id history_length hx_1 hy_1 hx_2 hy_2 ...`
+Example: `0.4123 0.7831 2 1 0.4100 0.8100`
+
+**OSC:**
+Payload per footstep is sent via `/footstep` message with matching format sequence as arguments:
+`[float(x), float(y), int(person_id), int(history_length), float(hx_1), float(hy_1), ...]`
 
 ## Project structure
 

@@ -46,6 +46,7 @@ impl OscSender {
             OscType::Float(event.footstep.x),
             OscType::Float(event.footstep.y),
             OscType::Int(event.person_id as i32),
+            OscType::Int(event.history.len() as i32),
         ];
 
         for step in &event.history {
