@@ -42,13 +42,20 @@ impl OscSender {
     }
 
     pub fn send(&self, event: &FootstepEvent) -> Result<()> {
+        let mut args = vec![
+            OscType::Float(event.footstep.x),
+            OscType::Float(event.footstep.y),
+            OscType::Int(event.person_id as i32),
+        ];
+
+        for step in &event.history {
+            args.push(OscType::Float(step.x));
+            args.push(OscType::Float(step.y));
+        }
+
         let msg_buf = encoder::encode(&OscPacket::Message(OscMessage {
             addr: "/footstep".to_string(),
-            args: vec![
-                OscType::Float(event.footstep.x),
-                OscType::Float(event.footstep.y),
-                OscType::Int(event.person_id as i32),
-            ],
+            args,
         })).context("Failed to encode OSC packet")?;
 
         #[cfg(feature = "debug")]

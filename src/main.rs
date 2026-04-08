@@ -60,7 +60,6 @@ struct Args {
         value_name = "OSC_TARGET",
         num_args = 0..=1,
         default_missing_value = "127.0.0.1:7001",
-        default_value = "127.0.0.1:7001"
     )]
     osc_target: Option<String>,
 

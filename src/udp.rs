@@ -40,7 +40,12 @@ impl UdpSender {
     }
 
     pub fn send(&self, event: &FootstepEvent) -> Result<()> {
-        let payload = format!("{:.4} {:.4}\n", event.footstep.x, event.footstep.y);
+        let mut payload = format!("{:.4} {:.4} {}", event.footstep.x, event.footstep.y, event.person_id);
+        
+        for step in &event.history {
+            payload.push_str(&format!(" {:.4} {:.4}", step.x, step.y));
+        }
+        payload.push('\n');
 
         #[cfg(feature = "debug")]
         debug!("Sending UDP footstep packet: {:?}", payload);

@@ -18,6 +18,7 @@ pub struct Footstep {
 pub struct FootstepEvent {
     pub person_id: usize,
     pub footstep: Footstep,
+    pub history: Vec<Footstep>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -426,9 +427,14 @@ impl FootstepTracker {
                     self.max_match_distance
                 );
 
+                let history = self.history.histories_for(&[*person_id].into())
+                    .remove(person_id)
+                    .unwrap_or_default();
+
                 new_events.push(FootstepEvent {
                     person_id: *person_id,
                     footstep: step_with_direction,
+                    history,
                 });
             }
         }
