@@ -475,6 +475,9 @@ Examples:
     if args.video:
         backend_run = f"{backend_run} -- {args.video}"
         print(f"{Color.YELLOW}Video/camera input: {args.video}{Color.RESET}")
+
+    # Keep UDP enabled by passing -u as the final backend argument.
+    backend_run = f"{backend_run} -u"
     
     backend_cmd = f"{backend_build} && {backend_run}"
     
