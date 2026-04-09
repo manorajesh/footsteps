@@ -110,8 +110,9 @@ async def main_async():
         
     subprocess.run(build_cmd, check=True)
     
+    run_cmd.append("--")
     if args.video:
-        run_cmd.extend(["--", args.video])
+        run_cmd.append(args.video)
     run_cmd.append("-u")
     
     frontend_cmd = [python_exec, "test_demo.py"]
