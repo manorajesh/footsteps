@@ -138,20 +138,25 @@ async def main_async():
     
     if args.ui == "legacy":
         frontend_cmd = [python_exec, "test_demo.py"]
+        tasks = [
+            asyncio.create_task(run_process(run_cmd, "BACKEND", Color.BLUE, cwd=project_root, is_shell=False)),
+            asyncio.create_task(run_process(frontend_cmd, "FRONTEND", Color.GREEN, cwd=frontend_cwd, is_shell=False))
+        ]
     else:
         frontend_cmd = [python_exec, "server.py"]
+        editor_cmd = [python_exec, "test_demo.py"]
         print(f"{Color.BLUE}Web UI available at http://localhost:8000/web_ui{Color.RESET}")
         
     frontend_cwd = project_root / "footsteps_projection_mapping"
 
     print(f"{Color.GREEN}Starting processes... Press Ctrl+C to stop.{Color.RESET}")
     
-    # Run the backend using shell to allow argument expansion comfortably if needed, or just exec.
-    # The original used `cargo built && cargo run`, but we handle build synchronously first above.
-    tasks = [
-        asyncio.create_task(run_process(run_cmd, "BACKEND", Color.BLUE, cwd=project_root, is_shell=False)),
-        asyncio.create_task(run_process(frontend_cmd, "FRONTEND", Color.GREEN, cwd=frontend_cwd, is_shell=False))
-    ]
+    if args.ui != "legacy":
+        tasks = [
+            asyncio.create_task(run_process(run_cmd, "BACKEND", Color.BLUE, cwd=project_root, is_shell=False)),
+            asyncio.create_task(run_process(frontend_cmd, "WEB_SERVER", Color.GREEN, cwd=frontend_cwd, is_shell=False)),
+            asyncio.create_task(run_process(editor_cmd, "OPENCV_DEBUG", Color.YELLOW, cwd=frontend_cwd, is_shell=False))
+        ]
     
     try:
         await asyncio.gather(*tasks)
