@@ -5,7 +5,7 @@ use ndarray::Array4;
 use half;
 
 #[cfg(feature = "debug")]
-use tracing::{ debug, info };
+use tracing::debug;
 
 /// COCO keypoints
 #[derive(Debug, Clone, Copy)]
