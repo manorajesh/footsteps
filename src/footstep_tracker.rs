@@ -55,9 +55,9 @@ struct PersistedHistoryStore {
 }
 
 const MIN_CONFIDENCE: f32 = 0.2;
-const HISTORY_MATCH_DISTANCE: f32 = 0.02;
-const HISTORY_DIRECTION_COS_THRESHOLD: f32 = 0.1;
-const HISTORY_DIRECTION_WEIGHT: f32 = 0.4;
+const HISTORY_MATCH_DISTANCE: f32 = 0.15;
+const HISTORY_DIRECTION_COS_THRESHOLD: f32 = 0.0;
+const HISTORY_DIRECTION_WEIGHT: f32 = 0.1;
 const MAX_PAST_HISTORIES: usize = 5000;
 const MAX_ARCHIVED_HISTORIES: usize = 2000;
 const MAX_STEPS_PER_HISTORY: usize = 300;
@@ -355,6 +355,8 @@ pub struct FootstepTracker {
     archived_matches: HashMap<usize, usize>,
     /// Permanent store of all past trajectories
     pub past_histories: Vec<(u64, Vec<Footstep>)>,
+    /// Active to past histories matches (to guarantee we stick to one match)
+    active_past_matches: HashMap<usize, usize>,
 }
 
 impl FootstepTracker {
@@ -368,6 +370,7 @@ impl FootstepTracker {
             archived_histories: Vec::new(),
             archived_matches: HashMap::new(),
             past_histories: Vec::new(),
+            active_past_matches: HashMap::new(),
         }
     }
 
@@ -551,7 +554,7 @@ impl FootstepTracker {
     }
     /// Checks if any currently active paths share consecutive points with historical paths.
     /// Returns a list of active person IDs mapped to the matched historical paths.
-    pub fn get_matched_past_paths(&self) -> HashMap<usize, Vec<Footstep>> {
+    pub fn get_matched_past_paths(&mut self) -> HashMap<usize, Vec<Footstep>> {
         let min_steps = 5; // N: minimum length to consider for a match
         let distance_threshold = 0.05; // Maximum distance to consider a step "matching"
         
@@ -563,8 +566,24 @@ impl FootstepTracker {
         
         let mut matches = HashMap::new();
         let mut used_past_indices = HashSet::new();
+        
+        // Retain active matches for IDs that are still present
+        self.active_past_matches.retain(|id, _| active_entries.iter().any(|(aid, _)| aid == id));
+
+        // Use already existing matches
+        for (person_id, past_idx) in &self.active_past_matches {
+            if let Some((_, past_path)) = self.past_histories.get(*past_idx) {
+                matches.insert(*person_id, past_path.clone());
+                used_past_indices.insert(*past_idx);
+            }
+        }
 
         for (person_id, current_steps) in active_entries {
+            // Skip if this person already has a locked-in match
+            if self.active_past_matches.contains_key(&person_id) {
+                continue;
+            }
+
             if current_steps.len() < min_steps {
                 continue;
             }
@@ -602,6 +621,7 @@ impl FootstepTracker {
                     if is_match {
                         matches.insert(person_id, past_path.clone());
                         used_past_indices.insert(past_idx);
+                        self.active_past_matches.insert(person_id, past_idx);
                         break 'history_loop;
                     }
                 }
