@@ -493,9 +493,14 @@ impl FootstepTracker {
         
         // Grab paths for all currently active people
         let current_histories = self.get_all_footsteps();
+        let mut active_entries: Vec<_> = current_histories.into_iter().collect();
+        // Sort by ID to ensure deterministic matching order (prevent flickering if people cross paths)
+        active_entries.sort_by_key(|(id, _)| *id);
+        
         let mut matches = HashMap::new();
+        let mut used_past_indices = HashSet::new();
 
-        for (person_id, current_steps) in current_histories {
+        for (person_id, current_steps) in active_entries {
             if current_steps.len() < min_steps {
                 continue;
             }
@@ -504,7 +509,11 @@ impl FootstepTracker {
             let active_segment = &current_steps[current_steps.len() - min_steps..];
 
             // Compare against every accumulated past history
-            'history_loop: for past_path in &self.past_histories {
+            'history_loop: for (past_idx, past_path) in self.past_histories.iter().enumerate() {
+                if used_past_indices.contains(&past_idx) {
+                    continue;
+                }
+                
                 if past_path.len() < min_steps {
                     continue;
                 }
@@ -528,6 +537,7 @@ impl FootstepTracker {
 
                     if is_match {
                         matches.insert(person_id, past_path.clone());
+                        used_past_indices.insert(past_idx);
                         break 'history_loop;
                     }
                 }
