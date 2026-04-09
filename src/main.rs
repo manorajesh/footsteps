@@ -356,8 +356,10 @@ fn main() -> Result<()> {
         }
 
         let new_footsteps = footstep_tracker.update(&keyed_keypoints);
+        let matched_paths = footstep_tracker.get_matched_past_paths();
 
         if let Some(sender) = osc_sender.as_ref() {
+            // First send new footsteps
             for event in &new_footsteps {
                 #[cfg(feature = "debug")]
                 if let Err(err) = sender.send(event) {
@@ -369,9 +371,22 @@ fn main() -> Result<()> {
                     let _ = sender.send(event);
                 }
             }
+            // Send full match paths
+            for (person_id, path) in &matched_paths {
+                #[cfg(feature = "debug")]
+                if let Err(err) = sender.send_path(*person_id, path) {
+                    error!("Failed to send OSC path packet: {:?}", err);
+                }
+
+                #[cfg(not(feature = "debug"))]
+                {
+                    let _ = sender.send_path(*person_id, path);
+                }
+            }
         }
 
         if let Some(sender) = udp_sender.as_ref() {
+            // First send new footsteps
             for event in &new_footsteps {
                 #[cfg(feature = "debug")]
                 if let Err(err) = sender.send(event) {
@@ -381,6 +396,18 @@ fn main() -> Result<()> {
                 #[cfg(not(feature = "debug"))]
                 {
                     let _ = sender.send(event);
+                }
+            }
+            // Send full match paths
+            for (person_id, path) in &matched_paths {
+                #[cfg(feature = "debug")]
+                if let Err(err) = sender.send_path(*person_id, path) {
+                    error!("Failed to send UDP path packet: {:?}", err);
+                }
+
+                #[cfg(not(feature = "debug"))]
+                {
+                    let _ = sender.send_path(*person_id, path);
                 }
             }
         }

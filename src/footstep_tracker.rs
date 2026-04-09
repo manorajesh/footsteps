@@ -294,6 +294,8 @@ pub struct FootstepTracker {
     archived_histories: Vec<(usize, Vec<Footstep>)>,
     /// Active to archived
     archived_matches: HashMap<usize, usize>,
+    /// Permanent store of all past trajectories
+    pub past_histories: Vec<Vec<Footstep>>,
 }
 
 impl FootstepTracker {
@@ -306,6 +308,7 @@ impl FootstepTracker {
             exit_timeout: Duration::from_millis(750),
             archived_histories: Vec::new(),
             archived_matches: HashMap::new(),
+            past_histories: Vec::new(),
         }
     }
 
@@ -459,8 +462,11 @@ impl FootstepTracker {
             let was_archived_match = self.archived_matches.remove(&id).is_some();
 
             if let Some(steps) = self.history.take_person(id) {
-                if !steps.is_empty() && !was_archived_match {
-                    self.archived_histories.push((id, steps));
+                if !steps.is_empty() {
+                    if !was_archived_match {
+                        self.archived_histories.push((id, steps.clone()));
+                    }
+                    self.past_histories.push(steps);
                 }
             }
 
@@ -479,7 +485,57 @@ impl FootstepTracker {
         let active_ids: HashSet<usize> = self.person_trackers.keys().cloned().collect();
         self.history.histories_for(&active_ids)
     }
+    /// Checks if any currently active paths share consecutive points with historical paths.
+    /// Returns a list of active person IDs mapped to the matched historical paths.
+    pub fn get_matched_past_paths(&self) -> HashMap<usize, Vec<Footstep>> {
+        let min_steps = 5; // N: minimum length to consider for a match
+        let distance_threshold = 0.05; // Maximum distance to consider a step "matching"
+        
+        // Grab paths for all currently active people
+        let current_histories = self.get_all_footsteps();
+        let mut matches = HashMap::new();
 
+        for (person_id, current_steps) in current_histories {
+            if current_steps.len() < min_steps {
+                continue;
+            }
+
+            // We only need to check the last N steps of their current path
+            let active_segment = &current_steps[current_steps.len() - min_steps..];
+
+            // Compare against every accumulated past history
+            'history_loop: for past_path in &self.past_histories {
+                if past_path.len() < min_steps {
+                    continue;
+                }
+
+                // Slide a window over the old path
+                let windows_to_check = past_path.len() - min_steps + 1;
+                for i in 0..windows_to_check {
+                    let past_segment = &past_path[i..i + min_steps];
+                    
+                    let mut is_match = true;
+                    for (active_step, past_step) in active_segment.iter().zip(past_segment.iter()) {
+                        let dx = active_step.x - past_step.x;
+                        let dy = active_step.y - past_step.y;
+                        let dist = (dx * dx + dy * dy).sqrt();
+                        
+                        if dist > distance_threshold {
+                            is_match = false;
+                            break;
+                        }
+                    }
+
+                    if is_match {
+                        matches.insert(person_id, past_path.clone());
+                        break 'history_loop;
+                    }
+                }
+            }
+        }
+
+        matches
+    }
     pub fn get_archived_footsteps(&self) -> &[(usize, Vec<Footstep>)] {
         &self.archived_histories
     }
@@ -489,5 +545,6 @@ impl FootstepTracker {
         self.history = FootstepHistory::new();
         self.archived_histories.clear();
         self.archived_matches.clear();
+        self.past_histories.clear();
     }
 }

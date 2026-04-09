@@ -55,4 +55,24 @@ impl UdpSender {
 
         Ok(())
     }
+
+    pub fn send_path(&self, person_id: usize, path: &[crate::footstep_tracker::Footstep]) -> Result<()> {
+        if path.is_empty() { return Ok(()); }
+        
+        let last = &path[path.len() - 1];
+        let mut payload = format!("{:.4} {:.4} {} {}", last.x, last.y, person_id, path.len());
+        
+        for step in path {
+            payload.push_str(&format!(" {:.4} {:.4}", step.x, step.y));
+        }
+        payload.push('\n');
+
+        #[cfg(feature = "debug")]
+        debug!("Sending UDP path packet: {:?}", payload);
+        self.socket
+            .send_to(payload.as_bytes(), self.target)
+            .context("Failed to send UDP path packet")?;
+
+        Ok(())
+    }
 }

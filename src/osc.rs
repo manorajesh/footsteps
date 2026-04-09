@@ -67,4 +67,35 @@ impl OscSender {
 
         Ok(())
     }
+
+    pub fn send_path(&self, person_id: usize, path: &[crate::footstep_tracker::Footstep]) -> Result<()> {
+        if path.is_empty() { return Ok(()); }
+
+        let last = &path[path.len() - 1];
+
+        let mut args = vec![
+            OscType::Float(last.x),
+            OscType::Float(last.y),
+            OscType::Int(person_id as i32),
+            OscType::Int(path.len() as i32),
+        ];
+
+        for step in path {
+            args.push(OscType::Float(step.x));
+            args.push(OscType::Float(step.y));
+        }
+
+        let msg_buf = encoder::encode(&OscPacket::Message(OscMessage {
+            addr: "/footstep".to_string(),
+            args,
+        })).context("Failed to encode OSC path packet")?;
+
+        #[cfg(feature = "debug")]
+        debug!("Sending OSC path packet to {}", self.target);
+        self.socket
+            .send_to(&msg_buf, self.target)
+            .context("Failed to send OSC path packet")?;
+
+        Ok(())
+    }
 }
