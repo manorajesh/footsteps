@@ -37,6 +37,7 @@ impl OscSender {
         Ok(Self { socket, target })
     }
 
+    #[allow(dead_code)]
     pub fn target(&self) -> std::net::SocketAddr {
         self.target
     }

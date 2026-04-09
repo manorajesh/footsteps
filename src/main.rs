@@ -255,7 +255,7 @@ fn main() -> Result<()> {
     let detector_pool: Arc<Mutex<Vec<PoseDetector>>> = Arc::new(
         Mutex::new(
             (0..worker_count)
-                .map(|idx| {
+                .map(|_idx| {
                     let res = PoseDetector::new(config.clone());
                     #[cfg(feature = "debug")]
                     {
@@ -275,7 +275,7 @@ fn main() -> Result<()> {
 
     if !no_history {
         match footstep_tracker.load_past_histories(&history_path) {
-            Ok(loaded) => {
+            Ok(_loaded) => {
                 #[cfg(feature = "debug")]
                 info!("Loaded {} historical paths from {}", loaded, history_path);
             }
@@ -329,7 +329,7 @@ fn main() -> Result<()> {
             }
 
             let fps = cap.get(videoio::CAP_PROP_FPS)?;
-            let frame_count = cap.get(videoio::CAP_PROP_FRAME_COUNT)?;
+            let _frame_count = cap.get(videoio::CAP_PROP_FRAME_COUNT)?;
             #[cfg(feature = "debug")]
             info!("Video: {:.1} FPS, {} frames", fps, frame_count as i32);
             (cap, Some(fps))
@@ -358,7 +358,7 @@ fn main() -> Result<()> {
 
     loop {
         let mut frame = Mat::default();
-        if let Err(err) = cap.read(&mut frame) {
+        if let Err(_err) = cap.read(&mut frame) {
             #[cfg(feature = "debug")]
             error!("Video read failed: {:?}", err);
             continue;
@@ -369,12 +369,12 @@ fn main() -> Result<()> {
             if is_video_file {
                 #[cfg(feature = "debug")]
                 debug!("Looping video...");
-                if let Err(err) = cap.set(videoio::CAP_PROP_POS_FRAMES, 0.0) {
+                if let Err(_err) = cap.set(videoio::CAP_PROP_POS_FRAMES, 0.0) {
                     #[cfg(feature = "debug")]
                     error!("Failed to seek video to start: {:?}", err);
                     continue;
                 }
-                if let Err(err) = cap.read(&mut frame) {
+                if let Err(_err) = cap.read(&mut frame) {
                     #[cfg(feature = "debug")]
                     error!("Failed to read frame after looping video: {:?}", err);
                     continue;
@@ -394,7 +394,7 @@ fn main() -> Result<()> {
 
         let people = match person_detector.detect_people(&frame) {
             Ok(people) => people,
-            Err(err) => {
+            Err(_err) => {
                 #[cfg(feature = "debug")]
                 error!("YOLO detection failed: {:?}", err);
                 continue;
@@ -417,7 +417,7 @@ fn main() -> Result<()> {
             .par_iter()
             .enumerate()
             .map(
-                |(person_idx, (person_id, bbox))| -> Result<_> {
+                |(_person_idx, (person_id, bbox))| -> Result<_> {
                     let expanded_bbox = bbox.expand(1.4);
 
                     let person_crop = YoloDetector::crop_region(
@@ -426,12 +426,10 @@ fn main() -> Result<()> {
                         pose_config.input_height
                     )?;
 
-                    let mut detector = match (
-                        {
+                    let mut detector = match {
                             let mut pool = detector_pool.lock().unwrap();
                             pool.pop()
-                        }
-                    ) {
+                        }  {
                         Some(det) => det,
                         None =>
                             PoseDetector::new(pose_config.clone()).context(
@@ -474,14 +472,14 @@ fn main() -> Result<()> {
             )
             .collect::<Result<Vec<_>>>() {
             Ok(processed) => processed,
-            Err(err) => {
+            Err(_err) => {
                 #[cfg(feature = "debug")]
                 error!("Pose processing failed: {:?}", err);
                 continue;
             }
         };
 
-        let expanded_bboxes: Vec<BoundingBox> = processed
+        let _expanded_bboxes: Vec<BoundingBox> = processed
             .iter()
             .map(|(bbox, _)| bbox.clone())
             .collect();
@@ -563,7 +561,7 @@ fn main() -> Result<()> {
             }
         }
 
-        if let Err(err) = draw_bounding_boxes(&mut frame, &people_with_ids) {
+        if let Err(_err) = draw_bounding_boxes(&mut frame, &people_with_ids) {
             #[cfg(feature = "debug")]
             error!("draw_bounding_boxes failed: {:?}", err);
             continue;
@@ -591,7 +589,7 @@ fn main() -> Result<()> {
             }
         }
 
-        if let Err(err) = draw_footsteps(&mut frame, &active_footsteps) {
+        if let Err(_err) = draw_footsteps(&mut frame, &active_footsteps) {
             #[cfg(feature = "debug")]
             error!("draw_footsteps failed: {:?}", err);
             continue;
@@ -599,14 +597,14 @@ fn main() -> Result<()> {
 
         // show old footsteps only if people are still there to avoid ghosts
         if !active_footsteps.is_empty() {
-            if let Err(err) = draw_archived_footsteps(&mut frame, archived) {
+            if let Err(_err) = draw_archived_footsteps(&mut frame, archived) {
                 #[cfg(feature = "debug")]
                 error!("draw_archived_footsteps failed: {:?}", err);
                 continue;
             }
         }
 
-        if let Err(err) = highgui::imshow(window_name, &frame) {
+        if let Err(_err) = highgui::imshow(window_name, &frame) {
             #[cfg(feature = "debug")]
             error!("imshow failed: {:?}", err);
             continue;
@@ -614,7 +612,7 @@ fn main() -> Result<()> {
 
         let pressed = match highgui::wait_key(frame_delay) {
             Ok(key) => key,
-            Err(err) => {
+            Err(_err) => {
                 #[cfg(feature = "debug")]
                 error!("wait_key failed: {:?}", err);
                 continue;

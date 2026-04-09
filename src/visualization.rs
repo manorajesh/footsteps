@@ -5,6 +5,7 @@ use anyhow::Result;
 use opencv::{ core, imgproc, prelude::* };
 use std::collections::HashMap;
 
+#[allow(dead_code)]
 fn confidence_to_color(confidence: f32) -> core::Scalar {
     let confidence = confidence.clamp(0.0, 1.0);
 
@@ -20,6 +21,7 @@ fn confidence_to_color(confidence: f32) -> core::Scalar {
 }
 
 /// Draw ankle
+#[allow(dead_code)]
 pub fn draw_ankle(frame: &mut Mat, keypoints: &Keypoints, confidence_threshold: f32) -> Result<()> {
     let height = frame.rows();
     let width = frame.cols();
@@ -60,6 +62,7 @@ pub fn draw_ankle(frame: &mut Mat, keypoints: &Keypoints, confidence_threshold: 
 }
 
 /// Draw all ankles
+#[allow(dead_code)]
 pub fn draw_all_ankles(
     frame: &mut Mat,
     all_keypoints: &MultiPoseKeypoints,
@@ -72,6 +75,7 @@ pub fn draw_all_ankles(
 }
 
 /// Draw all keypoints
+#[allow(dead_code)]
 pub fn draw_all_keypoints(
     frame: &mut Mat,
     all_keypoints: &MultiPoseKeypoints,
@@ -295,7 +299,7 @@ pub fn draw_bounding_boxes(frame: &mut Mat, bboxes: &[(usize, BoundingBox)]) -> 
     let height = frame.rows();
     let width = frame.cols();
 
-    for (idx, (id, bbox)) in bboxes.iter().enumerate() {
+    for (_idx, (id, bbox)) in bboxes.iter().enumerate() {
         let (x, y, w, h) = bbox.to_pixels(width, height);
 
         let color = if bbox.confidence > 0.7 {

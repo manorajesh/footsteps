@@ -34,7 +34,7 @@ pub enum Foot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct PersistedFootstep {
+pub(crate) struct PersistedFootstep {
     x: f32,
     y: f32,
     direction: Option<(f32, f32)>,
@@ -315,6 +315,7 @@ impl FootstepHistory {
         }
     }
 
+    #[allow(dead_code)]
     fn histories(&self) -> HashMap<usize, Vec<Footstep>> {
         self.history_map.clone()
     }
@@ -613,6 +614,7 @@ impl FootstepTracker {
         &self.archived_histories
     }
 
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.person_trackers.clear();
         self.history = FootstepHistory::new();

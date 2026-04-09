@@ -81,12 +81,14 @@ impl BoundingBox {
         }
     }
 
+    #[allow(dead_code)]
     pub fn center_distance2(&self, other: &Self) -> f32 {
         let dx = self.x - other.x;
         let dy = self.y - other.y;
         dx * dx + dy * dy
     }
 
+    #[allow(dead_code)]
     pub fn corner_l2_avg(&self, other: &Self) -> f32 {
         let half_w1 = self.width * 0.5;
         let half_h1 = self.height * 0.5;
@@ -142,6 +144,7 @@ pub struct YoloDetector {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct Track {
     id: usize,
     bbox: BoundingBox,

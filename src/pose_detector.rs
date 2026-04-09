@@ -39,6 +39,7 @@ pub type MultiPoseKeypoints = Vec<Keypoints>;
 
 /// Pose config
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct PoseDetectorConfig {
     pub model_path: String,
     pub input_width: usize,
@@ -76,6 +77,7 @@ impl Default for PoseDetectorConfig {
 }
 
 /// Pose detector
+#[allow(dead_code)]
 pub struct PoseDetector {
     pub config: PoseDetectorConfig,
     model: CoreMLModelWithState,
