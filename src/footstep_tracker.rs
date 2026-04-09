@@ -455,9 +455,9 @@ impl FootstepTracker {
             let right_hip = person_keypoints[Keypoint::RightHip as usize];
 
             let pelvis = (
-                (left_hip[0] + right_hip[0]) * 0.5,
-                (left_hip[1] + right_hip[1]) * 0.5,
-                (left_hip[2] + right_hip[2]) * 0.5,
+                (left_ankle[0] + right_ankle[0]) * 0.5,
+                (left_ankle[1] + right_ankle[1]) * 0.5,
+                (left_ankle[2] + right_ankle[2]) * 0.5,
             );
 
             let (pelvis_pos, motion_dir) = {
