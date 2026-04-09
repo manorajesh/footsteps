@@ -58,7 +58,7 @@ const HISTORY_DIRECTION_WEIGHT: f32 = 0.4;
 const MAX_PAST_HISTORIES: usize = 5000;
 const MAX_ARCHIVED_HISTORIES: usize = 2000;
 const MAX_STEPS_PER_HISTORY: usize = 300;
-const MAX_HISTORY_FILE_BYTES: usize = 20 * 1024 * 1024;
+const MAX_HISTORY_FILE_BYTES: usize = 200 * 1024 * 1024;
 
 #[derive(Debug, Default)]
 struct FootstepHistory {
