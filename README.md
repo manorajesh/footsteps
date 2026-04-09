@@ -35,7 +35,7 @@ Real-time multi-person footstep detection on macOS using CoreML (YOLOv11 for per
 - Provided: `models/yolo11n.mlpackage` (person detector)
 - You can swap in your own CoreML `.mlpackage`/`.mlmodelc` files with matching inputs; place them in `models/` and point the CLI at the path.
 
-## Build
+## Clone with submodules
 
 ```bash
   git clone --recurse-submodules https://github.com/manorajesh/footsteps.git
