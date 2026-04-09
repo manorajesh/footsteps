@@ -60,7 +60,9 @@ impl UdpSender {
         if path.is_empty() { return Ok(()); }
         
         let last = &path[path.len() - 1];
-        let mut payload = format!("{:.4} {:.4} {} {}", last.x, last.y, person_id, path.len());
+        let age_secs = last.timestamp.elapsed().as_secs_f32();
+        
+        let mut payload = format!("MATCH {} {} {:.2}", person_id, path.len(), age_secs);
         
         for step in path {
             payload.push_str(&format!(" {:.4} {:.4}", step.x, step.y));

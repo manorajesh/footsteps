@@ -72,12 +72,14 @@ impl OscSender {
         if path.is_empty() { return Ok(()); }
 
         let last = &path[path.len() - 1];
+        let age_secs = last.timestamp.elapsed().as_secs_f32();
 
         let mut args = vec![
             OscType::Float(last.x),
             OscType::Float(last.y),
             OscType::Int(person_id as i32),
             OscType::Int(path.len() as i32),
+            OscType::Float(age_secs),
         ];
 
         for step in path {
@@ -86,7 +88,7 @@ impl OscSender {
         }
 
         let msg_buf = encoder::encode(&OscPacket::Message(OscMessage {
-            addr: "/footstep".to_string(),
+            addr: "/match".to_string(),
             args,
         })).context("Failed to encode OSC path packet")?;
 
