@@ -42,16 +42,22 @@ impl OscSender {
     }
 
     pub fn send(&self, event: &FootstepEvent) -> Result<()> {
+        let (cdx, cdy) = event.footstep.direction.unwrap_or((0.0, 0.0));
         let mut args = vec![
             OscType::Float(event.footstep.x),
             OscType::Float(event.footstep.y),
+            OscType::Float(cdx),
+            OscType::Float(cdy),
             OscType::Int(event.person_id as i32),
             OscType::Int(event.history.len() as i32),
         ];
 
         for step in &event.history {
+            let (dx, dy) = step.direction.unwrap_or((0.0, 0.0));
             args.push(OscType::Float(step.x));
             args.push(OscType::Float(step.y));
+            args.push(OscType::Float(dx));
+            args.push(OscType::Float(dy));
         }
 
         let msg_buf = encoder::encode(&OscPacket::Message(OscMessage {
@@ -74,17 +80,23 @@ impl OscSender {
         let last = &path[path.len() - 1];
         let age_secs = last.timestamp.elapsed().as_secs_f32();
 
+        let (ldx, ldy) = last.direction.unwrap_or((0.0, 0.0));
         let mut args = vec![
             OscType::Float(last.x),
             OscType::Float(last.y),
+            OscType::Float(ldx),
+            OscType::Float(ldy),
             OscType::Int(person_id as i32),
             OscType::Int(path.len() as i32),
             OscType::Float(age_secs),
         ];
 
         for step in path {
+            let (dx, dy) = step.direction.unwrap_or((0.0, 0.0));
             args.push(OscType::Float(step.x));
             args.push(OscType::Float(step.y));
+            args.push(OscType::Float(dx));
+            args.push(OscType::Float(dy));
         }
 
         let msg_buf = encoder::encode(&OscPacket::Message(OscMessage {

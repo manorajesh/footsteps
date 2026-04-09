@@ -40,10 +40,12 @@ impl UdpSender {
     }
 
     pub fn send(&self, event: &FootstepEvent) -> Result<()> {
-        let mut payload = format!("{:.4} {:.4} {} {}", event.footstep.x, event.footstep.y, event.person_id, event.history.len());
+        let (cdx, cdy) = event.footstep.direction.unwrap_or((0.0, 0.0));
+        let mut payload = format!("{:.4} {:.4} {:.4} {:.4} {} {}", event.footstep.x, event.footstep.y, cdx, cdy, event.person_id, event.history.len());
         
         for step in &event.history {
-            payload.push_str(&format!(" {:.4} {:.4}", step.x, step.y));
+            let (dx, dy) = step.direction.unwrap_or((0.0, 0.0));
+            payload.push_str(&format!(" {:.4} {:.4} {:.4} {:.4}", step.x, step.y, dx, dy));
         }
         payload.push('\n');
 
@@ -65,7 +67,8 @@ impl UdpSender {
         let mut payload = format!("MATCH {} {} {:.2}", person_id, path.len(), age_secs);
         
         for step in path {
-            payload.push_str(&format!(" {:.4} {:.4}", step.x, step.y));
+            let (dx, dy) = step.direction.unwrap_or((0.0, 0.0));
+            payload.push_str(&format!(" {:.4} {:.4} {:.4} {:.4}", step.x, step.y, dx, dy));
         }
         payload.push('\n');
 
