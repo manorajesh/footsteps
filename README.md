@@ -37,6 +37,12 @@ Real-time multi-person footstep detection on macOS using CoreML (YOLOv11 for per
 
 ## Build
 
+```bash
+  git clone --recurse-submodules https://github.com/manorajesh/footsteps.git
+  ```
+
+## Build
+
 - Recommended (backend + frontend together):
 
   ```bash
