@@ -48,10 +48,7 @@ struct PersistedHistoryStore {
     histories: Vec<Vec<PersistedFootstep>>,
 }
 
-const COOLDOWN_FRAMES: usize = 10;
 const MIN_CONFIDENCE: f32 = 0.2;
-const MOVING_SPEED_THRESH: f32 = 0.01;
-const STILL_SPEED_THRESH: f32 = 0.008;
 const HISTORY_MATCH_DISTANCE: f32 = 0.02;
 const HISTORY_DIRECTION_COS_THRESHOLD: f32 = 0.1;
 const HISTORY_DIRECTION_WEIGHT: f32 = 0.4;
@@ -67,122 +64,152 @@ struct FootstepHistory {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct FootMotionState {
-    prev_pos: Option<(f32, f32)>,
-    prev_speed: f32,
-    cooldown: usize,
+struct EmaPoint {
+    pos: Option<(f32, f32)>,
+    alpha: f32,
+}
+
+impl EmaPoint {
+    fn new(alpha: f32) -> Self {
+        Self { pos: None, alpha }
+    }
+
+    fn update(&mut self, new_pos: (f32, f32)) -> (f32, f32) {
+        if let Some(current) = self.pos {
+            let updated = (
+                current.0 * (1.0 - self.alpha) + new_pos.0 * self.alpha,
+                current.1 * (1.0 - self.alpha) + new_pos.1 * self.alpha,
+            );
+            self.pos = Some(updated);
+            updated
+        } else {
+            self.pos = Some(new_pos);
+            new_pos
+        }
+    }
 }
 
 /// Person footstep tracker
 #[derive(Debug)]
 struct PersonFootstepTracker {
-    left: FootMotionState,
-    right: FootMotionState,
+    ema_pelvis: EmaPoint,
+    ema_velocity: EmaPoint,
+    
     last_seen: Instant,
     last_pelvis: Option<(f32, f32)>,
-    last_motion_dir: Option<(f32, f32)>,
+    last_valid_dir: Option<(f32, f32)>,
+    
+    // Distance-based synthetic stride tracking
+    last_step_pos: Option<(f32, f32)>,
+    next_foot_is_left: bool,
+    last_step_time: Instant,
 }
 
 impl PersonFootstepTracker {
     fn new() -> Self {
         Self {
-            left: FootMotionState { prev_pos: None, prev_speed: 0.0, cooldown: 0 },
-            right: FootMotionState { prev_pos: None, prev_speed: 0.0, cooldown: 0 },
+            ema_pelvis: EmaPoint::new(0.3),
+            ema_velocity: EmaPoint::new(0.1),
+            
             last_seen: Instant::now(),
             last_pelvis: None,
-            last_motion_dir: None,
+            last_valid_dir: None,
+            
+            last_step_pos: None,
+            next_foot_is_left: true,
+            last_step_time: Instant::now(),
         }
     }
 
     fn update_motion_hint(&mut self, pelvis: (f32, f32, f32)) -> ((f32, f32), Option<(f32, f32)>) {
-        let pelvis_pos = (pelvis.0, pelvis.1);
+        let raw_pelvis_pos = (pelvis.0, pelvis.1);
+        
+        if pelvis.2 < MIN_CONFIDENCE {
+            return (self.ema_pelvis.pos.unwrap_or(raw_pelvis_pos), self.last_valid_dir);
+        }
+        
+        let smoothed_pelvis = self.ema_pelvis.update(raw_pelvis_pos);
 
-        // using pelvis movement as motion direction
-        let motion_dir = if pelvis.2 < MIN_CONFIDENCE {
-            None
-        } else if let Some(prev) = self.last_pelvis {
-            let dx = pelvis_pos.0 - prev.0;
-            let dy = pelvis_pos.1 - prev.1;
-            let len = (dx * dx + dy * dy).sqrt();
-            if len > f32::EPSILON {
-                Some((dx / len, dy / len))
-            } else {
-                None
+        if let Some(prev) = self.last_pelvis {
+            let dx = smoothed_pelvis.0 - prev.0;
+            let dy = smoothed_pelvis.1 - prev.1;
+            
+            // Calculate and smooth the raw velocity vector instead of normalizing noisy micro-movements
+            let smoothed_vel = self.ema_velocity.update((dx, dy));
+            let speed = (smoothed_vel.0 * smoothed_vel.0 + smoothed_vel.1 * smoothed_vel.1).sqrt();
+            
+            // Only update the direction if we are actually moving significantly (e.g. out of pose jitter)
+            if speed > 0.0005 {
+                self.last_valid_dir = Some((smoothed_vel.0 / speed, smoothed_vel.1 / speed));
             }
-        } else {
-            None
-        };
+        }
 
-        self.last_pelvis = Some(pelvis_pos);
-        self.last_motion_dir = motion_dir;
-
-        (pelvis_pos, motion_dir)
+        self.last_pelvis = Some(smoothed_pelvis);
+        (smoothed_pelvis, self.last_valid_dir)
     }
 
     fn update(
         &mut self,
-        left_ankle: (f32, f32, f32),
-        right_ankle: (f32, f32, f32),
-        pelvis: (f32, f32, f32)
+        _left_ankle: (f32, f32, f32),
+        _right_ankle: (f32, f32, f32),
+        motion_dir: Option<(f32, f32)>
     ) -> Vec<Footstep> {
         let mut new_steps = Vec::new();
-
-        if let Some(step) = Self::process_foot(Foot::Left, &mut self.left, left_ankle, pelvis) {
-            new_steps.push(step);
-        }
-
-        if let Some(step) = Self::process_foot(Foot::Right, &mut self.right, right_ankle, pelvis) {
-            new_steps.push(step);
-        }
-
         self.last_seen = Instant::now();
-        new_steps
-    }
+        
+        let pelvis = self.ema_pelvis.pos.unwrap_or((0.0, 0.0));
+        let fixed_time = Instant::now();
+        let time_since_last = fixed_time.duration_since(self.last_step_time).as_secs_f32();
 
-    fn process_foot(
-        foot: Foot,
-        motion: &mut FootMotionState,
-        ankle: (f32, f32, f32),
-        pelvis: (f32, f32, f32)
-    ) -> Option<Footstep> {
-        if motion.cooldown > 0 {
-            motion.cooldown -= 1;
-        }
+        if let Some(dir) = motion_dir {
+            // We use standard distance measurement to generate smooth fixed footsteps 
+            // completely ignoring the exact ankle positioning that caused the jitter
+            let stride_length = 0.04; // The required distance traveled before step
+            let stride_width = 0.015; // The orthogonal distance outward
 
-        // pause state changes if confidence drops
-        if ankle.2 < MIN_CONFIDENCE || pelvis.2 < MIN_CONFIDENCE {
-            motion.prev_pos = None;
-            motion.prev_speed = 0.0;
-            return None;
-        }
-        let pos_abs = (ankle.0, ankle.1);
-        let speed = if let Some(prev) = motion.prev_pos {
-            let dy = pos_abs.0 - prev.0;
-            let dx = pos_abs.1 - prev.1;
-            (dy * dy + dx * dx).sqrt()
+            // Setup first step
+            if self.last_step_pos.is_none() {
+                self.last_step_pos = Some((pelvis.0, pelvis.1));
+                self.last_step_time = fixed_time;
+                return new_steps;
+            }
+
+            let last_pos = self.last_step_pos.unwrap();
+            let dx = pelvis.0 - last_pos.0;
+            let dy = pelvis.1 - last_pos.1;
+            let dist = (dx * dx + dy * dy).sqrt();
+
+            if dist >= stride_length && time_since_last > 0.3 {
+                // Orthogonal vector (rotate by 90/-90 deg) depending on left/right foot
+                let perp_dir = if self.next_foot_is_left {
+                    (-dir.1, dir.0) // Left side
+                } else {
+                    (dir.1, -dir.0) // Right side
+                };
+
+                let foot_x = pelvis.0 + perp_dir.0 * stride_width;
+                let foot_y = pelvis.1 + perp_dir.1 * stride_width;
+
+                new_steps.push(Footstep {
+                    x: foot_y, // Note the coordinate flip x <-> y in existing logic
+                    y: foot_x,
+                    direction: motion_dir,
+                    timestamp: fixed_time,
+                    foot: if self.next_foot_is_left { Foot::Left } else { Foot::Right },
+                });
+
+                self.last_step_pos = Some((pelvis.0, pelvis.1));
+                self.next_foot_is_left = !self.next_foot_is_left;
+                self.last_step_time = fixed_time;
+            }
         } else {
-            0.0
-        };
-
-        let was_moving = motion.prev_speed > MOVING_SPEED_THRESH;
-        let now_still = speed < STILL_SPEED_THRESH;
-
-        let mut maybe_step = None;
-        if was_moving && now_still && motion.cooldown == 0 {
-            maybe_step = Some(Footstep {
-                x: pos_abs.1,
-                y: pos_abs.0,
-                direction: None,
-                timestamp: std::time::Instant::now(),
-                foot,
-            });
-            motion.cooldown = COOLDOWN_FRAMES;
+            // Drop tracking if stationary over 0.5s so they can start fresh
+            if time_since_last > 0.5 {
+                self.last_step_pos = None;
+            }
         }
 
-        motion.prev_pos = Some(pos_abs);
-        motion.prev_speed = speed;
-
-        maybe_step
+        new_steps
     }
 }
 
@@ -442,7 +469,7 @@ impl FootstepTracker {
             let new_steps = tracker.update(
                 (left_ankle[0], left_ankle[1], left_ankle[2]),
                 (right_ankle[0], right_ankle[1], right_ankle[2]),
-                pelvis
+                motion_dir
             );
 
             for step in new_steps {
