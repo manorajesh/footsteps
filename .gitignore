@@ -17,3 +17,5 @@ venv/
 calibration.json
 *.pyc
 __pycache__/
+data/
+logs/

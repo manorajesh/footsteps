@@ -55,6 +55,10 @@ const STILL_SPEED_THRESH: f32 = 0.008;
 const HISTORY_MATCH_DISTANCE: f32 = 0.02;
 const HISTORY_DIRECTION_COS_THRESHOLD: f32 = 0.1;
 const HISTORY_DIRECTION_WEIGHT: f32 = 0.4;
+const MAX_PAST_HISTORIES: usize = 5000;
+const MAX_ARCHIVED_HISTORIES: usize = 2000;
+const MAX_STEPS_PER_HISTORY: usize = 300;
+const MAX_HISTORY_FILE_BYTES: usize = 20 * 1024 * 1024;
 
 #[derive(Debug, Default)]
 struct FootstepHistory {
@@ -498,6 +502,7 @@ impl FootstepTracker {
         self.archived_matches.retain(|id, _| active_ids.contains(id));
 
         self.history.prune_older_than(self.footstep_display_duration);
+        self.enforce_storage_limits();
 
         new_events
     }
@@ -614,6 +619,8 @@ impl FootstepTracker {
             })
             .collect();
 
+        self.enforce_storage_limits();
+
         Ok(self.past_histories.len())
     }
 
@@ -631,13 +638,14 @@ impl FootstepTracker {
             .unwrap_or_default()
             .as_millis() as u64;
 
-        let store = PersistedHistoryStore {
+        let mut store = PersistedHistoryStore {
             version: 1,
             saved_at_unix_ms: now_ms,
             histories: self.past_histories
                 .iter()
                 .map(|path_steps| {
-                    path_steps
+                    let start = path_steps.len().saturating_sub(MAX_STEPS_PER_HISTORY);
+                    path_steps[start..]
                         .iter()
                         .map(|step| PersistedFootstep {
                             x: step.x,
@@ -650,10 +658,33 @@ impl FootstepTracker {
                 .collect(),
         };
 
+        // Keep persisted history bounded so long-running sessions do not create huge files.
+        while store.histories.len() > MAX_PAST_HISTORIES {
+            store.histories.remove(0);
+        }
+
         let tmp_path = path.with_extension("json.tmp");
-        let payload = serde_json::to_string_pretty(&store).context(
+        let mut payload = serde_json::to_string_pretty(&store).context(
             "Failed to serialize footstep history to JSON"
         )?;
+
+        while payload.len() > MAX_HISTORY_FILE_BYTES {
+            if store.histories.len() > 1 {
+                store.histories.remove(0);
+            } else if let Some(first) = store.histories.first_mut() {
+                if first.len() <= 1 {
+                    break;
+                }
+                let drop_count = (first.len() / 10).max(1);
+                first.drain(0..drop_count.min(first.len() - 1));
+            } else {
+                break;
+            }
+
+            payload = serde_json::to_string_pretty(&store).context(
+                "Failed to serialize footstep history to JSON"
+            )?;
+        }
 
         fs::write(&tmp_path, payload).with_context(|| {
             format!("Failed to write temporary footstep history file: {}", tmp_path.display())
@@ -668,5 +699,31 @@ impl FootstepTracker {
         })?;
 
         Ok(())
+    }
+
+    fn enforce_storage_limits(&mut self) {
+        for steps in self.past_histories.iter_mut() {
+            if steps.len() > MAX_STEPS_PER_HISTORY {
+                let keep_from = steps.len() - MAX_STEPS_PER_HISTORY;
+                steps.drain(0..keep_from);
+            }
+        }
+        self.past_histories.retain(|steps| !steps.is_empty());
+        if self.past_histories.len() > MAX_PAST_HISTORIES {
+            let drop_count = self.past_histories.len() - MAX_PAST_HISTORIES;
+            self.past_histories.drain(0..drop_count);
+        }
+
+        for (_, steps) in self.archived_histories.iter_mut() {
+            if steps.len() > MAX_STEPS_PER_HISTORY {
+                let keep_from = steps.len() - MAX_STEPS_PER_HISTORY;
+                steps.drain(0..keep_from);
+            }
+        }
+        self.archived_histories.retain(|(_, steps)| !steps.is_empty());
+        if self.archived_histories.len() > MAX_ARCHIVED_HISTORIES {
+            let drop_count = self.archived_histories.len() - MAX_ARCHIVED_HISTORIES;
+            self.archived_histories.drain(0..drop_count);
+        }
     }
 }

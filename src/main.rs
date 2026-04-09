@@ -16,20 +16,114 @@ use person_detector::{ YoloDetector, YoloDetectorConfig, BoundingBox, PersonTrac
 use std::sync::{ Arc, Mutex };
 use udp::UdpSender;
 use osc::OscSender;
+#[cfg(feature = "debug")]
+use std::fs;
+#[cfg(feature = "debug")]
+use std::path::{ Path, PathBuf };
+#[cfg(feature = "debug")]
+use std::sync::OnceLock;
+#[cfg(feature = "debug")]
+use std::time::SystemTime;
 
 #[cfg(feature = "debug")]
-use tracing::{ debug, error, info };
+use tracing::{ debug, error, info, warn };
 #[cfg(feature = "debug")]
 use tracing_subscriber::EnvFilter;
 #[cfg(feature = "debug")]
 use indicatif::{ ProgressBar, ProgressStyle };
+#[cfg(feature = "debug")]
+use tracing_appender::rolling;
+#[cfg(feature = "debug")]
+use tracing_subscriber::prelude::*;
+
+#[cfg(feature = "debug")]
+const LOG_DIR: &str = "logs";
+#[cfg(feature = "debug")]
+const LOG_PREFIX: &str = "footstep-tracker.log";
+#[cfg(feature = "debug")]
+const MAX_LOG_FILES: usize = 168; // 7 days of hourly logs
+#[cfg(feature = "debug")]
+const MAX_LOG_TOTAL_BYTES: u64 = 200 * 1024 * 1024;
+
+#[cfg(feature = "debug")]
+static LOG_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
+
+#[cfg(feature = "debug")]
+fn enforce_log_retention(
+    log_dir: &Path,
+    prefix: &str,
+    max_files: usize,
+    max_total_bytes: u64
+) -> std::io::Result<()> {
+    let mut files: Vec<(PathBuf, SystemTime, u64)> = Vec::new();
+
+    for entry in fs::read_dir(log_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+
+        if !name.starts_with(prefix) {
+            continue;
+        }
+
+        let meta = fs::metadata(&path)?;
+        files.push((
+            path,
+            meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+            meta.len(),
+        ));
+    }
+
+    // Newest first; delete from oldest side.
+    files.sort_by(|a, b| b.1.cmp(&a.1));
+
+    for (idx, (path, _, _)) in files.iter().enumerate() {
+        if idx >= max_files {
+            let _ = fs::remove_file(path);
+        }
+    }
+
+    let mut kept: Vec<(PathBuf, u64)> = files
+        .into_iter()
+        .take(max_files)
+        .map(|(path, _, size)| (path, size))
+        .collect();
+
+    let mut total: u64 = kept.iter().map(|(_, size)| *size).sum();
+    while total > max_total_bytes && !kept.is_empty() {
+        if let Some((path, size)) = kept.pop() {
+            let _ = fs::remove_file(path);
+            total = total.saturating_sub(size);
+        }
+    }
+
+    Ok(())
+}
 
 #[cfg(feature = "debug")]
 fn init_tracing() {
+    let _ = fs::create_dir_all(LOG_DIR);
+    if let Err(err) = enforce_log_retention(Path::new(LOG_DIR), LOG_PREFIX, MAX_LOG_FILES, MAX_LOG_TOTAL_BYTES) {
+        eprintln!("Warning: failed to enforce log retention: {}", err);
+    }
+
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let file_appender = rolling::hourly(LOG_DIR, LOG_PREFIX);
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    let _ = LOG_GUARD.set(guard);
+
+    let stdout_layer = tracing_subscriber::fmt::layer().with_ansi(true);
+    let file_layer = tracing_subscriber::fmt::layer().with_ansi(false).with_writer(non_blocking);
 
     // ignore errors if already set
-    let _ = tracing_subscriber::fmt().with_env_filter(filter).with_ansi(true).try_init();
+    let _ = tracing_subscriber::registry().with(filter).with(stdout_layer).with(file_layer).try_init();
 }
 
 #[derive(Clone, Debug)]
@@ -264,15 +358,27 @@ fn main() -> Result<()> {
 
     loop {
         let mut frame = Mat::default();
-        cap.read(&mut frame)?;
+        if let Err(err) = cap.read(&mut frame) {
+            #[cfg(feature = "debug")]
+            error!("Video read failed: {:?}", err);
+            continue;
+        }
 
         if frame.empty() {
             // loop video back to start
             if is_video_file {
                 #[cfg(feature = "debug")]
                 debug!("Looping video...");
-                cap.set(videoio::CAP_PROP_POS_FRAMES, 0.0)?;
-                cap.read(&mut frame)?;
+                if let Err(err) = cap.set(videoio::CAP_PROP_POS_FRAMES, 0.0) {
+                    #[cfg(feature = "debug")]
+                    error!("Failed to seek video to start: {:?}", err);
+                    continue;
+                }
+                if let Err(err) = cap.read(&mut frame) {
+                    #[cfg(feature = "debug")]
+                    error!("Failed to read frame after looping video: {:?}", err);
+                    continue;
+                }
 
                 // if still no frame then stop
                 if frame.empty() {
@@ -286,7 +392,14 @@ fn main() -> Result<()> {
         #[cfg(feature = "debug")]
         let start = std::time::Instant::now();
 
-        let people = person_detector.detect_people(&frame)?;
+        let people = match person_detector.detect_people(&frame) {
+            Ok(people) => people,
+            Err(err) => {
+                #[cfg(feature = "debug")]
+                error!("YOLO detection failed: {:?}", err);
+                continue;
+            }
+        };
         let people_with_ids = id_tracker.assign_ids(people);
 
         #[cfg(feature = "debug")]
@@ -300,7 +413,7 @@ fn main() -> Result<()> {
         let pose_config = config.clone();
         let detector_pool = detector_pool.clone();
 
-        let processed: Vec<(BoundingBox, Option<(usize, Keypoints)>)> = people_with_ids
+        let processed: Vec<(BoundingBox, Option<(usize, Keypoints)>)> = match people_with_ids
             .par_iter()
             .enumerate()
             .map(
@@ -359,7 +472,14 @@ fn main() -> Result<()> {
                     Ok((expanded_bbox, keyed))
                 }
             )
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<Result<Vec<_>>>() {
+            Ok(processed) => processed,
+            Err(err) => {
+                #[cfg(feature = "debug")]
+                error!("Pose processing failed: {:?}", err);
+                continue;
+            }
+        };
 
         let expanded_bboxes: Vec<BoundingBox> = processed
             .iter()
@@ -443,7 +563,11 @@ fn main() -> Result<()> {
             }
         }
 
-        draw_bounding_boxes(&mut frame, &people_with_ids)?;
+        if let Err(err) = draw_bounding_boxes(&mut frame, &people_with_ids) {
+            #[cfg(feature = "debug")]
+            error!("draw_bounding_boxes failed: {:?}", err);
+            continue;
+        }
         let active_footsteps = footstep_tracker.get_all_footsteps();
         let archived = footstep_tracker.get_archived_footsteps();
 
@@ -467,17 +591,52 @@ fn main() -> Result<()> {
             }
         }
 
-        draw_footsteps(&mut frame, &active_footsteps)?;
+        if let Err(err) = draw_footsteps(&mut frame, &active_footsteps) {
+            #[cfg(feature = "debug")]
+            error!("draw_footsteps failed: {:?}", err);
+            continue;
+        }
 
         // show old footsteps only if people are still there to avoid ghosts
         if !active_footsteps.is_empty() {
-            draw_archived_footsteps(&mut frame, archived)?;
+            if let Err(err) = draw_archived_footsteps(&mut frame, archived) {
+                #[cfg(feature = "debug")]
+                error!("draw_archived_footsteps failed: {:?}", err);
+                continue;
+            }
         }
 
-        highgui::imshow(window_name, &frame)?;
+        if let Err(err) = highgui::imshow(window_name, &frame) {
+            #[cfg(feature = "debug")]
+            error!("imshow failed: {:?}", err);
+            continue;
+        }
 
-        if highgui::wait_key(frame_delay)? == (b'q' as i32) {
+        let pressed = match highgui::wait_key(frame_delay) {
+            Ok(key) => key,
+            Err(err) => {
+                #[cfg(feature = "debug")]
+                error!("wait_key failed: {:?}", err);
+                continue;
+            }
+        };
+
+        if pressed == (b'q' as i32) {
             break;
+        }
+
+        #[cfg(feature = "debug")]
+        if frame_index % 1800 == 0 {
+            if
+                let Err(err) = enforce_log_retention(
+                    Path::new(LOG_DIR),
+                    LOG_PREFIX,
+                    MAX_LOG_FILES,
+                    MAX_LOG_TOTAL_BYTES
+                )
+            {
+                warn!("Log retention pass failed: {}", err);
+            }
         }
 
         frame_index = frame_index.wrapping_add(1);
