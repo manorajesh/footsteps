@@ -42,10 +42,16 @@ struct PersistedFootstep {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistedPath {
+    pub timestamp_ms: u64,
+    pub steps: Vec<PersistedFootstep>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct PersistedHistoryStore {
     version: u32,
     saved_at_unix_ms: u64,
-    histories: Vec<Vec<PersistedFootstep>>,
+    histories: Vec<PersistedPath>,
 }
 
 const MIN_CONFIDENCE: f32 = 0.2;
@@ -347,7 +353,7 @@ pub struct FootstepTracker {
     /// Active to archived
     archived_matches: HashMap<usize, usize>,
     /// Permanent store of all past trajectories
-    pub past_histories: Vec<Vec<Footstep>>,
+    pub past_histories: Vec<(u64, Vec<Footstep>)>,
 }
 
 impl FootstepTracker {
@@ -518,7 +524,11 @@ impl FootstepTracker {
                     if !was_archived_match {
                         self.archived_histories.push((id, steps.clone()));
                     }
-                    self.past_histories.push(steps);
+                    let now_ms = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+                    self.past_histories.push((now_ms, steps));
                 }
             }
 
@@ -562,7 +572,7 @@ impl FootstepTracker {
             let active_segment = &current_steps[current_steps.len() - min_steps..];
 
             // Compare against every accumulated past history
-            'history_loop: for (past_idx, past_path) in self.past_histories.iter().enumerate() {
+            'history_loop: for (past_idx, (_, past_path)) in self.past_histories.iter().enumerate() {
                 if used_past_indices.contains(&past_idx) {
                     continue;
                 }
@@ -632,8 +642,10 @@ impl FootstepTracker {
         let now = Instant::now();
         self.past_histories = store.histories
             .into_iter()
-            .map(|path_steps| {
-                path_steps
+            .map(|persisted_path| {
+                #[cfg(feature = "debug")]
+                tracing::info!("Loaded history path with timestamp: {}", persisted_path.timestamp_ms);
+                let steps = persisted_path.steps
                     .into_iter()
                     .map(|step| Footstep {
                         x: step.x,
@@ -642,7 +654,8 @@ impl FootstepTracker {
                         timestamp: now,
                         foot: step.foot,
                     })
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>();
+                (persisted_path.timestamp_ms, steps)
             })
             .collect();
 
@@ -670,9 +683,11 @@ impl FootstepTracker {
             saved_at_unix_ms: now_ms,
             histories: self.past_histories
                 .iter()
-                .map(|path_steps| {
+                .map(|(timestamp_ms, path_steps)| {
+                    #[cfg(feature = "debug")]
+                    tracing::debug!("Saving history path with timestamp: {}", timestamp_ms);
                     let start = path_steps.len().saturating_sub(MAX_STEPS_PER_HISTORY);
-                    path_steps[start..]
+                    let steps = path_steps[start..]
                         .iter()
                         .map(|step| PersistedFootstep {
                             x: step.x,
@@ -680,7 +695,11 @@ impl FootstepTracker {
                             direction: step.direction,
                             foot: step.foot,
                         })
-                        .collect::<Vec<_>>()
+                        .collect::<Vec<_>>();
+                    PersistedPath {
+                        timestamp_ms: *timestamp_ms,
+                        steps,
+                    }
                 })
                 .collect(),
         };
@@ -699,11 +718,11 @@ impl FootstepTracker {
             if store.histories.len() > 1 {
                 store.histories.remove(0);
             } else if let Some(first) = store.histories.first_mut() {
-                if first.len() <= 1 {
+                if first.steps.len() <= 1 {
                     break;
                 }
-                let drop_count = (first.len() / 10).max(1);
-                first.drain(0..drop_count.min(first.len() - 1));
+                let drop_count = (first.steps.len() / 10).max(1);
+                first.steps.drain(0..drop_count.min(first.steps.len() - 1));
             } else {
                 break;
             }
@@ -729,13 +748,13 @@ impl FootstepTracker {
     }
 
     fn enforce_storage_limits(&mut self) {
-        for steps in self.past_histories.iter_mut() {
+        for (_, steps) in self.past_histories.iter_mut() {
             if steps.len() > MAX_STEPS_PER_HISTORY {
                 let keep_from = steps.len() - MAX_STEPS_PER_HISTORY;
                 steps.drain(0..keep_from);
             }
         }
-        self.past_histories.retain(|steps| !steps.is_empty());
+        self.past_histories.retain(|(_, steps)| !steps.is_empty());
         if self.past_histories.len() > MAX_PAST_HISTORIES {
             let drop_count = self.past_histories.len() - MAX_PAST_HISTORIES;
             self.past_histories.drain(0..drop_count);
