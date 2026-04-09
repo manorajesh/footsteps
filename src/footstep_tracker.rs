@@ -641,12 +641,11 @@ impl FootstepTracker {
             format!("Failed to parse footstep history JSON: {}", path.display())
         })?;
 
+        let initial_count = store.histories.len();
         let now = Instant::now();
         self.past_histories = store.histories
             .into_iter()
             .map(|persisted_path| {
-                #[cfg(feature = "debug")]
-                tracing::info!("Loaded history path with timestamp: {}", persisted_path.timestamp_ms);
                 let steps = persisted_path.steps
                     .into_iter()
                     .map(|step| Footstep {
@@ -663,7 +662,13 @@ impl FootstepTracker {
 
         self.enforce_storage_limits();
 
-        Ok(self.past_histories.len())
+        let final_count = self.past_histories.len();
+        let skipped = initial_count.saturating_sub(final_count);
+
+        #[cfg(feature = "debug")]
+        tracing::info!("Loaded {} history paths (skipped {})", final_count, skipped);
+
+        Ok(final_count)
     }
 
     pub fn save_past_histories<P: AsRef<Path>>(&self, path: P) -> Result<()> {
