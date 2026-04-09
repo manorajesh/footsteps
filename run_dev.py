@@ -91,10 +91,30 @@ async def main_async():
     parser = argparse.ArgumentParser(description="Footsteps Development Server")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode (--features debug)")
     parser.add_argument("--video", type=str, help="Path to video file for backend (or camera index)")
+    parser.add_argument("--clean-logs", action="store_true", help="Clean up log files before starting")
+    parser.add_argument("--clean-data", action="store_true", help="Clean up data files before starting")
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parent
     os.chdir(project_root)
+
+    if args.clean_logs:
+        print(f"\n{Color.YELLOW}Cleaning logs directory...{Color.RESET}")
+        logs_dir = project_root / "logs"
+        if logs_dir.exists():
+            import shutil
+            shutil.rmtree(logs_dir)
+        logs_dir.mkdir(exist_ok=True)
+        print(f"{Color.GREEN}Logs cleaned.{Color.RESET}")
+
+    if args.clean_data:
+        print(f"\n{Color.YELLOW}Cleaning data directory...{Color.RESET}")
+        data_dir = project_root / "data"
+        if data_dir.exists():
+            import shutil
+            shutil.rmtree(data_dir)
+        data_dir.mkdir(exist_ok=True)
+        print(f"{Color.GREEN}Data cleaned.{Color.RESET}")
 
     print(f"\n{Color.BOLD}=== Setting up Python Virtual Environment ==={Color.RESET}")
     python_exec = setup_virtual_environment(project_root)

@@ -66,6 +66,9 @@ Real-time multi-person footstep detection on macOS using CoreML (YOLOv11 for per
 
   # combine with debug
   python3 run_dev.py --debug --video people.mp4
+
+  # clean logs and data before run
+  python3 run_dev.py --clean-logs --clean-data
   ```
 
 - Runner behavior:

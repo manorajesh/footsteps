@@ -42,6 +42,12 @@ Combine options:
 python3 run_dev.py --debug --video people.mp4
 ```
 
+### Clean Logs and Data
+Clean logs and data directories before starting the processes:
+```bash
+python3 run_dev.py --clean-logs --clean-data
+```
+
 ### Display Help
 ```bash
 python3 run_dev.py --help
@@ -89,6 +95,12 @@ rm -rf venv
 ```
 
 ## Command-Line Options
+
+### `--clean-logs`
+Cleans up the `logs/` directory before starting the servers.
+
+### `--clean-data`
+Cleans up the `data/` directory (e.g. `footstep_history.json`) before starting the servers.
 
 ### `--debug`
 Enables debug mode for the backend:
