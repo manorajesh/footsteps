@@ -93,6 +93,7 @@ async def main_async():
     parser.add_argument("--video", type=str, help="Path to video file for backend (or camera index)")
     parser.add_argument("--clean-logs", action="store_true", help="Clean up log files before starting")
     parser.add_argument("--clean-data", action="store_true", help="Clean up data files before starting")
+    parser.add_argument("--ui", choices=["web", "legacy"], default="web", help="Choose which frontend UI to run (default: web)")
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parent
@@ -135,7 +136,12 @@ async def main_async():
         run_cmd.append(args.video)
     run_cmd.append("-u")
     
-    frontend_cmd = [python_exec, "test_demo.py"]
+    if args.ui == "legacy":
+        frontend_cmd = [python_exec, "test_demo.py"]
+    else:
+        frontend_cmd = [python_exec, "server.py"]
+        print(f"{Color.BLUE}Web UI available at http://localhost:8000/web_ui{Color.RESET}")
+        
     frontend_cwd = project_root / "footsteps_projection_mapping"
 
     print(f"{Color.GREEN}Starting processes... Press Ctrl+C to stop.{Color.RESET}")
