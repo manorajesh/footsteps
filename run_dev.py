@@ -144,7 +144,7 @@ async def main_async():
         ]
     else:
         frontend_cmd = [python_exec, "server.py"]
-        editor_cmd = [python_exec, "test_demo.py"]
+        editor_cmd = [python_exec, "calibration_editor.py"]
         print(f"{Color.BLUE}Web UI available at http://localhost:8000/web_ui{Color.RESET}")
         
     frontend_cwd = project_root / "footsteps_projection_mapping"
