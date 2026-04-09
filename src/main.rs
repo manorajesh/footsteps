@@ -72,6 +72,18 @@ struct Args {
         default_missing_value = "127.0.0.1:7000"
     )]
     udp_target: Option<String>,
+
+    /// Path to persisted footsteps history JSON file
+    #[arg(
+        long,
+        value_name = "HISTORY_PATH",
+        default_value = "data/footstep_history.json"
+    )]
+    history_path: String,
+
+    /// Disable loading/saving footsteps history to disk
+    #[arg(long, default_value_t = false)]
+    no_history: bool,
 }
 
 fn parse_video_source(input: &str) -> Result<VideoSource, String> {
@@ -92,6 +104,8 @@ fn main() -> Result<()> {
     let args = Args::parse();
     let model_path = args.model_path.unwrap_or_else(|| "models/rtmpose.mlpackage".to_string());
     let video_source = args.video;
+    let history_path = args.history_path;
+    let no_history = args.no_history;
 
     let yolo_config = YoloDetectorConfig::default();
     let mut person_detector = YoloDetector::new(yolo_config).context(
@@ -164,6 +178,23 @@ fn main() -> Result<()> {
     );
 
     let mut footstep_tracker = FootstepTracker::new(1000);
+
+    if !no_history {
+        match footstep_tracker.load_past_histories(&history_path) {
+            Ok(loaded) => {
+                #[cfg(feature = "debug")]
+                info!("Loaded {} historical paths from {}", loaded, history_path);
+            }
+            Err(err) => {
+                #[cfg(feature = "debug")]
+                error!("Failed to load history file {}: {:?}", history_path, err);
+                #[cfg(not(feature = "debug"))]
+                eprintln!("Warning: failed to load history file {}: {}", history_path, err);
+            }
+        }
+    }
+
+    let mut last_saved_history_count = footstep_tracker.past_history_count();
 
     let mut id_tracker = PersonTracker::new(1000);
 
@@ -416,6 +447,26 @@ fn main() -> Result<()> {
         let active_footsteps = footstep_tracker.get_all_footsteps();
         let archived = footstep_tracker.get_archived_footsteps();
 
+        if !no_history {
+            let current_history_count = footstep_tracker.past_history_count();
+            if current_history_count != last_saved_history_count {
+                if let Err(err) = footstep_tracker.save_past_histories(&history_path) {
+                    #[cfg(feature = "debug")]
+                    error!("Failed to persist history file {}: {:?}", history_path, err);
+                    #[cfg(not(feature = "debug"))]
+                    eprintln!("Warning: failed to persist history file {}: {}", history_path, err);
+                } else {
+                    last_saved_history_count = current_history_count;
+                    #[cfg(feature = "debug")]
+                    debug!(
+                        "Persisted {} historical paths to {}",
+                        last_saved_history_count,
+                        history_path
+                    );
+                }
+            }
+        }
+
         draw_footsteps(&mut frame, &active_footsteps)?;
 
         // show old footsteps only if people are still there to avoid ghosts
@@ -430,6 +481,15 @@ fn main() -> Result<()> {
         }
 
         frame_index = frame_index.wrapping_add(1);
+    }
+
+    if !no_history {
+        if let Err(err) = footstep_tracker.save_past_histories(&history_path) {
+            #[cfg(feature = "debug")]
+            error!("Failed to save history file on shutdown {}: {:?}", history_path, err);
+            #[cfg(not(feature = "debug"))]
+            eprintln!("Warning: failed to save history file on shutdown {}: {}", history_path, err);
+        }
     }
 
     Ok(())

@@ -1,6 +1,11 @@
 use crate::pose_detector::{ Keypoint, Keypoints };
+use anyhow::{ Context, Result };
 use std::collections::{ HashMap, HashSet };
+use std::fs;
+use std::path::Path;
 use std::time::{ Duration, Instant };
+use std::time::{ SystemTime, UNIX_EPOCH };
+use serde::{ Deserialize, Serialize };
 
 /// Footstep
 #[derive(Debug, Clone)]
@@ -22,9 +27,25 @@ pub struct FootstepEvent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Serialize, Deserialize)]
 pub enum Foot {
     Left,
     Right,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedFootstep {
+    x: f32,
+    y: f32,
+    direction: Option<(f32, f32)>,
+    foot: Foot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedHistoryStore {
+    version: u32,
+    saved_at_unix_ms: u64,
+    histories: Vec<Vec<PersistedFootstep>>,
 }
 
 const COOLDOWN_FRAMES: usize = 10;
@@ -556,5 +577,96 @@ impl FootstepTracker {
         self.archived_histories.clear();
         self.archived_matches.clear();
         self.past_histories.clear();
+    }
+
+    pub fn past_history_count(&self) -> usize {
+        self.past_histories.len()
+    }
+
+    pub fn load_past_histories<P: AsRef<Path>>(&mut self, path: P) -> Result<usize> {
+        let path = path.as_ref();
+        if !path.exists() {
+            return Ok(0);
+        }
+
+        let raw = fs::read_to_string(path).with_context(|| {
+            format!("Failed to read footstep history file: {}", path.display())
+        })?;
+
+        let store: PersistedHistoryStore = serde_json::from_str(&raw).with_context(|| {
+            format!("Failed to parse footstep history JSON: {}", path.display())
+        })?;
+
+        let now = Instant::now();
+        self.past_histories = store.histories
+            .into_iter()
+            .map(|path_steps| {
+                path_steps
+                    .into_iter()
+                    .map(|step| Footstep {
+                        x: step.x,
+                        y: step.y,
+                        direction: step.direction,
+                        timestamp: now,
+                        foot: step.foot,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
+        Ok(self.past_histories.len())
+    }
+
+    pub fn save_past_histories<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        let path = path.as_ref();
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create history directory: {}", parent.display())
+            })?;
+        }
+
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        let store = PersistedHistoryStore {
+            version: 1,
+            saved_at_unix_ms: now_ms,
+            histories: self.past_histories
+                .iter()
+                .map(|path_steps| {
+                    path_steps
+                        .iter()
+                        .map(|step| PersistedFootstep {
+                            x: step.x,
+                            y: step.y,
+                            direction: step.direction,
+                            foot: step.foot,
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect(),
+        };
+
+        let tmp_path = path.with_extension("json.tmp");
+        let payload = serde_json::to_string_pretty(&store).context(
+            "Failed to serialize footstep history to JSON"
+        )?;
+
+        fs::write(&tmp_path, payload).with_context(|| {
+            format!("Failed to write temporary footstep history file: {}", tmp_path.display())
+        })?;
+
+        fs::rename(&tmp_path, path).with_context(|| {
+            format!(
+                "Failed to move temporary history file into place: {} -> {}",
+                tmp_path.display(),
+                path.display()
+            )
+        })?;
+
+        Ok(())
     }
 }
