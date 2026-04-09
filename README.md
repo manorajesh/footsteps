@@ -37,19 +37,53 @@ Real-time multi-person footstep detection on macOS using CoreML (YOLOv11 for per
 
 ## Build
 
-- Release (recommended for FPS):
+- Recommended (backend + frontend together):
+
+  ```bash
+  python3 run_dev.py
+  ```
+
+- With debug feature enabled for backend logs/timings:
+
+  ```bash
+  python3 run_dev.py --debug
+  ```
+
+- With a specific backend source (camera index or video file):
+
+  ```bash
+  # camera 1
+  python3 run_dev.py --video 1
+
+  # mp4 file
+  python3 run_dev.py --video people.mp4
+
+  # combine with debug
+  python3 run_dev.py --debug --video people.mp4
+  ```
+
+- Runner behavior:
+
+  ```text
+  - Creates/uses ./venv automatically
+  - Installs Python deps from footsteps_projection_mapping/requirements.txt
+  - Starts backend and frontend with unified logging
+  - Restarts crashed processes automatically
+  ```
+
+- Backend-only release build (recommended for FPS):
 
   ```bash
   cargo build --release
   ```
 
-- Dev build:
+- Backend-only dev build:
 
   ```bash
   cargo build
   ```
 
-- Debug logs (timings, model info):
+- Backend-only debug feature build:
 
   ```bash
   cargo build --release --features debug
@@ -57,13 +91,35 @@ Real-time multi-person footstep detection on macOS using CoreML (YOLOv11 for per
 
 ## Run
 
-- Webcam with defaults (RTMPose + YOLO, camera 0):
+- Recommended app run (backend + frontend):
+
+  ```bash
+  python3 run_dev.py
+  ```
+
+- Debug runner mode:
+
+  ```bash
+  python3 run_dev.py --debug
+  ```
+
+- Runner with camera/video source forwarded to backend:
+
+  ```bash
+  # camera 0
+  python3 run_dev.py --video 0
+
+  # video file
+  python3 run_dev.py --video /path/to/video.mp4
+  ```
+
+- Backend-only webcam defaults (RTMPose + YOLO, camera 0):
 
   ```bash
   cargo run --release
   ```
 
-- Specify model and source (camera index or video path):
+- Backend-only: specify model and source (camera index or video path):
 
   ```bash
   # camera 1
