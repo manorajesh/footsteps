@@ -555,13 +555,10 @@ impl FootstepTracker {
     /// Checks if any currently active paths share consecutive points with historical paths.
     /// Returns a list of active person IDs mapped to the matched historical paths.
     pub fn get_matched_past_paths(&mut self) -> HashMap<usize, Vec<Footstep>> {
-        let min_steps = 5; // N: minimum length to consider for a match
-        let distance_threshold = 0.05; // Maximum distance to consider a step "matching"
-        
         // Grab paths for all currently active people
         let current_histories = self.get_all_footsteps();
         let mut active_entries: Vec<_> = current_histories.into_iter().collect();
-        // Sort by ID to ensure deterministic matching order (prevent flickering if people cross paths)
+        // Sort by ID to ensure deterministic matching order
         active_entries.sort_by_key(|(id, _)| *id);
         
         let mut matches = HashMap::new();
@@ -578,53 +575,81 @@ impl FootstepTracker {
             }
         }
 
+        let distance_threshold = 0.15; // Increased threshold for spatial proximity
+        let min_cos_similarity = 0.5; // Match roughly the same direction (up to ~60 degrees)
+
         for (person_id, current_steps) in active_entries {
-            // Skip if this person already has a locked-in match
+            // Skip if already locked-in
             if self.active_past_matches.contains_key(&person_id) {
                 continue;
             }
 
-            if current_steps.len() < min_steps {
+            if current_steps.len() < 2 {
                 continue;
             }
 
-            // We only need to check the last N steps of their current path
-            let active_segment = &current_steps[current_steps.len() - min_steps..];
+            // Estimate current location and direction from last two steps
+            let last_step = &current_steps[current_steps.len() - 1];
+            let prev_step = &current_steps[current_steps.len() - 2];
+            
+            let dx = last_step.x - prev_step.x;
+            let dy = last_step.y - prev_step.y;
+            let mag = (dx * dx + dy * dy).sqrt();
+            if mag < 0.001 {
+                continue;
+            }
+            let cur_dir = (dx / mag, dy / mag);
 
-            // Compare against every accumulated past history
-            'history_loop: for (past_idx, (_, past_path)) in self.past_histories.iter().enumerate() {
-                if used_past_indices.contains(&past_idx) {
+            let mut best_match: Option<(usize, f32)> = None; // (past_idx, score)
+
+            // Search all past histories for the best alignment
+            for (past_idx, (_, past_path)) in self.past_histories.iter().enumerate() {
+                if used_past_indices.contains(&past_idx) || past_path.len() < 2 {
                     continue;
                 }
-                
-                if past_path.len() < min_steps {
-                    continue;
-                }
 
-                // Slide a window over the old path
-                let windows_to_check = past_path.len() - min_steps + 1;
-                for i in 0..windows_to_check {
-                    let past_segment = &past_path[i..i + min_steps];
+                let mut min_dist = f32::MAX;
+                let mut best_align_score = f32::MAX;
+
+                for i in 0..past_path.len() - 1 {
+                    let p1 = &past_path[i];
+                    let p2 = &past_path[i + 1];
                     
-                    let mut is_match = true;
-                    for (active_step, past_step) in active_segment.iter().zip(past_segment.iter()) {
-                        let dx = active_step.x - past_step.x;
-                        let dy = active_step.y - past_step.y;
-                        let dist = (dx * dx + dy * dy).sqrt();
-                        
-                        if dist > distance_threshold {
-                            is_match = false;
-                            break;
+                    let pdx = p2.x - p1.x;
+                    let pdy = p2.y - p1.y;
+                    let pmag = (pdx * pdx + pdy * pdy).sqrt();
+                    if pmag < 0.001 { continue; }
+                    let pdir = (pdx / pmag, pdy / pmag);
+                    
+                    let dist = ((last_step.x - p2.x).powi(2) + (last_step.y - p2.y).powi(2)).sqrt();
+                    let cos_sim = cur_dir.0 * pdir.0 + cur_dir.1 * pdir.1;
+
+                    if dist < distance_threshold && cos_sim > min_cos_similarity {
+                        // Score formula: smaller distance is better, larger cos_sim is better (so 1.0 - cos_sim)
+                        let score = dist + (1.0 - cos_sim) * 0.1;
+                        if score < best_align_score {
+                            best_align_score = score;
+                            min_dist = dist;
                         }
                     }
+                }
 
-                    if is_match {
-                        matches.insert(person_id, past_path.clone());
-                        used_past_indices.insert(past_idx);
-                        self.active_past_matches.insert(person_id, past_idx);
-                        break 'history_loop;
+                if best_align_score < f32::MAX {
+                    if let Some((_, best_score)) = best_match {
+                        if best_align_score < best_score {
+                            best_match = Some((past_idx, best_align_score));
+                        }
+                    } else {
+                        best_match = Some((past_idx, best_align_score));
                     }
                 }
+            }
+
+            if let Some((best_idx, _)) = best_match {
+                let past_path = self.past_histories[best_idx].1.clone();
+                matches.insert(person_id, past_path);
+                used_past_indices.insert(best_idx);
+                self.active_past_matches.insert(person_id, best_idx);
             }
         }
 
