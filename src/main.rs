@@ -12,7 +12,7 @@ use clap::Parser;
 use opencv::{ highgui, prelude::*, videoio };
 use rayon::prelude::*;
 use pose_detector::{ PoseDetector, PoseDetectorConfig, Keypoints };
-use visualization::{ draw_footsteps, draw_archived_footsteps, draw_bounding_boxes };
+use visualization::{ draw_footsteps, draw_archived_footsteps, draw_bounding_boxes, draw_matched_paths };
 use footstep_tracker::FootstepTracker;
 use person_detector::{ YoloDetector, YoloDetectorConfig, BoundingBox, PersonTracker };
 use std::sync::{ Arc, Mutex };
@@ -594,6 +594,13 @@ fn main() -> Result<()> {
         if let Err(err) = draw_footsteps(&mut frame, &active_footsteps) {
             #[cfg(feature = "debug")]
             error!("draw_footsteps failed: {:?}", err);
+            continue;
+        }
+
+        // Draw matched historical paths
+        if let Err(err) = draw_matched_paths(&mut frame, &matched_paths) {
+            #[cfg(feature = "debug")]
+            error!("draw_matched_paths failed: {:?}", err);
             continue;
         }
 

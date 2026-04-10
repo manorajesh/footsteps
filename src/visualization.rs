@@ -294,6 +294,75 @@ pub fn draw_archived_footsteps(
     Ok(())
 }
 
+/// Draw matched historical paths for each person
+pub fn draw_matched_paths(
+    frame: &mut Mat,
+    matched_paths: &HashMap<usize, Vec<Footstep>>
+) -> Result<()> {
+    let height = frame.rows();
+    let width = frame.cols();
+
+    for (person_idx, footsteps) in matched_paths {
+        let color = get_person_color(*person_idx);
+
+        for footstep in footsteps {
+            let x = (footstep.x * (width as f32)) as i32;
+            let y = (footstep.y * (height as f32)) as i32;
+
+            // Draw larger circle with bright color to indicate matched path
+            let radius = 6;
+            imgproc::circle(
+                frame,
+                core::Point::new(x, y),
+                radius,
+                color,
+                2, // Hollow circle to distinguish from other footsteps
+                imgproc::LINE_AA,
+                0
+            )?;
+
+            // Draw a smaller filled circle at center
+            imgproc::circle(
+                frame,
+                core::Point::new(x, y),
+                3,
+                color,
+                -1,
+                imgproc::LINE_AA,
+                0
+            )?;
+
+            if let Some((dx, dy)) = footstep.direction {
+                let arrow_norm_len = 0.05_f32;
+                let end_x = ((footstep.x + dx * arrow_norm_len) * (width as f32)) as i32;
+                let end_y = ((footstep.y + dy * arrow_norm_len) * (height as f32)) as i32;
+
+                imgproc::line(
+                    frame,
+                    core::Point::new(x, y),
+                    core::Point::new(end_x, end_y),
+                    color,
+                    3,
+                    imgproc::LINE_AA,
+                    0
+                )?;
+
+                imgproc::circle(
+                    frame,
+                    core::Point::new(end_x, end_y),
+                    3,
+                    color,
+                    -1,
+                    imgproc::LINE_AA,
+                    0
+                )?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Draw bounding boxes from person detection
 pub fn draw_bounding_boxes(frame: &mut Mat, bboxes: &[(usize, BoundingBox)]) -> Result<()> {
     let height = frame.rows();
