@@ -509,6 +509,20 @@ fn main() -> Result<()> {
         let new_footsteps = footstep_tracker.update(&keyed_keypoints);
         let matched_paths = footstep_tracker.get_matched_past_paths();
 
+        #[cfg(feature = "debug")]
+        if frame_index % 30 == 0 {
+            if !matched_paths.is_empty() {
+                let total_matched_steps: usize = matched_paths.iter().map(|(_, steps)| steps.len()).sum();
+                debug!("Matched paths: {} people, {} total steps", matched_paths.len(), total_matched_steps);
+                for (person_id, steps) in &matched_paths {
+                    if !steps.is_empty() {
+                        let first = &steps[0];
+                        debug!("  Person {}: {} steps, first at ({:.3}, {:.3})", person_id, steps.len(), first.x, first.y);
+                    }
+                }
+            }
+        }
+
         if let Some(sender) = osc_sender.as_ref() {
             // First send new footsteps
             for event in &new_footsteps {
@@ -598,6 +612,11 @@ fn main() -> Result<()> {
         }
 
         // Draw matched historical paths
+        #[cfg(feature = "debug")]
+        if frame_index % 30 == 0 && !matched_paths.is_empty() {
+            debug!("Drawing {} matched paths", matched_paths.len());
+        }
+        
         if let Err(err) = draw_matched_paths(&mut frame, &matched_paths) {
             #[cfg(feature = "debug")]
             error!("draw_matched_paths failed: {:?}", err);

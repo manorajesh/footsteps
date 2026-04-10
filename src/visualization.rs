@@ -302,12 +302,20 @@ pub fn draw_matched_paths(
     let height = frame.rows();
     let width = frame.cols();
 
+    let mut drawn_count = 0;
     for (person_idx, footsteps) in matched_paths {
         let color = get_person_color(*person_idx);
 
         for footstep in footsteps {
             let x = (footstep.x * (width as f32)) as i32;
             let y = (footstep.y * (height as f32)) as i32;
+
+            // Clamp coordinates to valid screen range
+            if x < 0 || x >= width || y < 0 || y >= height {
+                continue;
+            }
+
+            drawn_count += 1;
 
             // Draw larger circle with bright color to indicate matched path
             let radius = 6;
@@ -337,25 +345,27 @@ pub fn draw_matched_paths(
                 let end_x = ((footstep.x + dx * arrow_norm_len) * (width as f32)) as i32;
                 let end_y = ((footstep.y + dy * arrow_norm_len) * (height as f32)) as i32;
 
-                imgproc::line(
-                    frame,
-                    core::Point::new(x, y),
-                    core::Point::new(end_x, end_y),
-                    color,
-                    3,
-                    imgproc::LINE_AA,
-                    0
-                )?;
+                if end_x >= 0 && end_x < width && end_y >= 0 && end_y < height {
+                    imgproc::line(
+                        frame,
+                        core::Point::new(x, y),
+                        core::Point::new(end_x, end_y),
+                        color,
+                        3,
+                        imgproc::LINE_AA,
+                        0
+                    )?;
 
-                imgproc::circle(
-                    frame,
-                    core::Point::new(end_x, end_y),
-                    3,
-                    color,
-                    -1,
-                    imgproc::LINE_AA,
-                    0
-                )?;
+                    imgproc::circle(
+                        frame,
+                        core::Point::new(end_x, end_y),
+                        3,
+                        color,
+                        -1,
+                        imgproc::LINE_AA,
+                        0
+                    )?;
+                }
             }
         }
     }
