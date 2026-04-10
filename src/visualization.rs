@@ -317,25 +317,25 @@ pub fn draw_matched_paths(
 
             drawn_count += 1;
 
-            // Draw larger circle with bright color to indicate matched path
-            let radius = 6;
+            // Draw larger filled circle for matched path to make it more visible
+            let radius = 8;
             imgproc::circle(
                 frame,
                 core::Point::new(x, y),
                 radius,
                 color,
-                2, // Hollow circle to distinguish from other footsteps
+                -1, // Filled
                 imgproc::LINE_AA,
                 0
             )?;
 
-            // Draw a smaller filled circle at center
+            // Draw a white outline
             imgproc::circle(
                 frame,
                 core::Point::new(x, y),
-                3,
-                color,
-                -1,
+                radius + 2,
+                core::Scalar::new(255.0, 255.0, 255.0, 0.0), // White
+                2,
                 imgproc::LINE_AA,
                 0
             )?;

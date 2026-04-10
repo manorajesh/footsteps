@@ -575,8 +575,8 @@ impl FootstepTracker {
             }
         }
 
-        let distance_threshold = 0.15; // Increased threshold for spatial proximity
-        let min_cos_similarity = 0.5; // Match roughly the same direction (up to ~60 degrees)
+        let distance_threshold = 0.25; // Increased threshold for spatial proximity
+        let min_cos_similarity = 0.3; // Match roughly the same direction (up to ~70 degrees)
 
         for (person_id, current_steps) in active_entries {
             // Skip if already locked-in

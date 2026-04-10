@@ -564,6 +564,9 @@ fn main() -> Result<()> {
                 }
             }
             // Send full match paths
+            if !matched_paths.is_empty() {
+                println!("Sending {} matched paths via UDP", matched_paths.len());
+            }
             for (person_id, path) in &matched_paths {
                 #[cfg(feature = "debug")]
                 if let Err(err) = sender.send_path(*person_id, path) {
@@ -612,9 +615,8 @@ fn main() -> Result<()> {
         }
 
         // Draw matched historical paths
-        #[cfg(feature = "debug")]
-        if frame_index % 30 == 0 && !matched_paths.is_empty() {
-            debug!("Drawing {} matched paths", matched_paths.len());
+        if !matched_paths.is_empty() {
+            println!("Drawing {} matched paths with {} total steps", matched_paths.len(), matched_paths.iter().map(|(_, steps)| steps.len()).sum::<usize>());
         }
         
         if let Err(err) = draw_matched_paths(&mut frame, &matched_paths) {
