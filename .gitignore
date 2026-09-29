@@ -1,0 +1,17 @@
+# SwiftPM / Xcode
+.build/
+.swiftpm/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+Package.resolved.bak
+
+# macOS
+.DS_Store
+
+# INV-3: no imagery is ever persisted. Guard against accidental commits of captures.
+*.mov
+*.mp4
+*.heic
+captures/
