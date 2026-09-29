@@ -1,6 +1,0 @@
-[submodule "coreml-rs"]
-	path = coreml-rs
-	url = https://github.com/manorajesh/coreml-rs.git
-[submodule "footsteps_projection_mapping"]
-	path = footsteps_projection_mapping
-	url = https://github.com/sonyahamid/footsteps_projection_mapping.git
